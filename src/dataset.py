@@ -12,16 +12,13 @@ import os
 import pandas as pd
 from PIL import Image
 from typing import Tuple
-import numpy as np
 import torchvision.transforms as T
 import torchvision
 import matplotlib.pyplot as plt
 from utils import yolo2voc
-import math
+from typing import List
 
-# TODO: see the mzbai's repo to collate fn properly so can use albu!
-
-
+# FIXME: see the mzbai's repo to collate fn properly so can use albu!
 def get_transform(mode: str, image_size: int = 448) -> T.Compose:
     """Create a torchvision transform for the given mode.
 
@@ -111,18 +108,18 @@ class VOCDataset(torch.utils.data.Dataset):
     def __len__(self) -> int:
         return len(self.df)
 
-    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        # print(f"index: {index}")
-        image_path = os.path.join(
-            self.images_dir, self.df.loc[index, "image_id"]
-        )
+    @staticmethod
+    def strip_label_path(label_path: str) -> List[list]:
+        """Strips the label path and returns the bounding boxes
+        in the format of [class_id, x, y, width, height] in yolo format.
 
-        image = Image.open(image_path).convert("RGB")
+        Args:
+            label_path (str): The path of the labels.
 
-        label_path = os.path.join(
-            self.labels_dir, self.df.loc[index, "label_id"]
-        )
-
+        Returns:
+            bbox (List[list]): The bounding boxes in the format of
+                               [class_id, x, y, width, height] in yolo format.
+        """
         bboxes = []
 
         with open(label_path) as f:
@@ -134,7 +131,20 @@ class VOCDataset(torch.utils.data.Dataset):
 
                 bboxes.append([class_label, x, y, width, height])
 
-        # convert to tensor with no autograd history
+        return bboxes
+
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        image_path = os.path.join(
+            self.images_dir, self.df.loc[index, "image_id"]
+        )
+
+        image = Image.open(image_path).convert("RGB")
+
+        label_path = os.path.join(
+            self.labels_dir, self.df.loc[index, "label_id"]
+        )
+
+        bboxes = self.strip_label_path(label_path)
 
         if self.transforms:
             image = self.transforms(image)
@@ -142,75 +152,8 @@ class VOCDataset(torch.utils.data.Dataset):
 
         # bboxes: [num_bbox, 5] where 5 is [class_id, x, y, width, height] yolo format
         bboxes = encode(bboxes, self.S, self.B, self.C)
-        # bboxes = xywhn_to_label_matrix(bboxes, self.S, self.B, self.C)
+
         return image, bboxes
-
-
-def xywhn_to_label_matrix(
-    bboxes: torch.Tensor, S: int, B: int, C: int
-) -> torch.Tensor:
-    """Convert bounding boxes from xywh to label matrix for ingestion by Yolo v1.
-
-    Following convention:
-    - https://blog.paperspace.com/how-to-implement-a-yolo-object-detector-in-pytorch/amp/ and
-    - https://towardsdatascience.com/yolov1-you-only-look-once-object-detection-e1f3ffec8a89
-
-    Label matrix is 7x7x30 where the depth 30 is:
-    [x_grid, y_grid, w, h, objectness, x_grid, y_grid, w, h, objectness, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20]
-    where p1-p20 are the 20 classes.
-
-    But we follow aladdinpersson https://github.com/aladdinpersson/Machine-Learning-Collection/blob/master/ML/Pytorch/object_detection/YOLO/dataset.py where we follow the reverse convention:
-    [p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20, x_grid, y_grid, w, h, objectness, x_grid, y_grid, w, h, objectness]
-
-    Args:
-        bboxes (torch.Tensor): bboxes in YOLO format (class_label, x_center, y_center, width, height) where coordinates are normalized to [0, 1].
-
-    Returns:
-        label_matrix (torch.Tensor): label matrix in YOLO format.
-    """
-    # initialize label matrix
-    # label_matrix has shape (S, S, 5 * B + C) = (7, 7, 30)
-    label_matrix = torch.zeros((S, S, 5 * B + C))
-
-    for each_bbox in bboxes:
-
-        # unpack yolo bbox
-        class_label, x_center, y_center, width, height = each_bbox.tolist()
-
-        # cast class_label to int
-        class_label = int(class_label)
-
-        x_grid = math.floor(S * x_center)
-        y_grid = math.floor(S * y_center)
-
-        x_grid_offset, y_grid_offset = (
-            S * x_center - x_grid,
-            S * y_center - y_grid,
-        )
-
-        print(f"class_id: {class_label}")
-        print(f"x_center: {x_center} y_center: {y_center}")
-        print(f"width: {width} height: {height}")
-        print(f"x_grid: {x_grid} y_grid: {y_grid}")
-        print(f"x_grid_offset: {x_grid_offset} y_grid_offset: {y_grid_offset}")
-
-        if (
-            label_matrix[y_grid, x_grid, 20] == 0
-            and label_matrix[y_grid, x_grid, 25] == 0
-        ):
-
-            label_matrix[y_grid, x_grid, 20] = 1
-            label_matrix[y_grid, x_grid, 25] = 1
-
-            new_yolo_bbox_coordinates = torch.tensor(
-                [x_grid_offset, y_grid_offset, width, height]
-            )
-
-            label_matrix[y_grid, x_grid, 21:25] = new_yolo_bbox_coordinates
-            label_matrix[y_grid, x_grid, 26:30] = new_yolo_bbox_coordinates
-
-            label_matrix[y_grid, x_grid, class_label] = 1
-    return label_matrix
 
 
 def encode(bboxes: torch.Tensor, S: int, B: int, C: int) -> torch.Tensor:
@@ -226,7 +169,7 @@ def encode(bboxes: torch.Tensor, S: int, B: int, C: int) -> torch.Tensor:
 
     But we follow aladdinpersson https://github.com/aladdinpersson/Machine-Learning-Collection/blob/
                                 master/ML/Pytorch/object_detection/YOLO/dataset.py where we follow the reverse convention:
-    [p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20, x_grid, y_grid, w, h, objectness, x_grid, y_grid, w, h, objectness]
+    [p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20, objectness, x_grid, y_grid, w, h, objectness, x_grid, y_grid, w, h]
 
     Args:
         bboxes (torch.Tensor): bboxes in YOLO format (class_label, x_center, y_center, width, height)
@@ -240,6 +183,7 @@ def encode(bboxes: torch.Tensor, S: int, B: int, C: int) -> torch.Tensor:
     # (S, S, 5 * B + C) -> (S, S, 30) if S=7, B=2, C=20
     label_matrix = torch.zeros((S, S, 5 * B + C))
 
+    # bboxes: [num_bbox, 5] where 5 is [class_id, x, y, width, height] yolo format
     for bbox in bboxes:
 
         # unpack yolo bbox
@@ -256,11 +200,11 @@ def encode(bboxes: torch.Tensor, S: int, B: int, C: int) -> torch.Tensor:
             S * y_center - y_grid,
         )
 
-        print(f"class_id: {class_id}")
-        print(f"x_center: {x_center} y_center: {y_center}")
-        print(f"width: {width} height: {height}")
-        print(f"x_grid: {x_grid} y_grid: {y_grid}")
-        print(f"x_grid_offset: {x_grid_offset} y_grid_offset: {y_grid_offset}")
+        # print(f"class_id: {class_id}")
+        # print(f"x_center: {x_center} y_center: {y_center}")
+        # print(f"width: {width} height: {height}")
+        # print(f"x_grid: {x_grid} y_grid: {y_grid}")
+        # print(f"x_grid_offset: {x_grid_offset} y_grid_offset: {y_grid_offset}")
 
         # 将第gridy行，gridx列的网格设置为负责当前ground truth的预测，置信度和对应类别概率均置为1
         # here we fill both bbox's objectness to be 1 if it is originally 0
@@ -285,7 +229,7 @@ def encode(bboxes: torch.Tensor, S: int, B: int, C: int) -> torch.Tensor:
     return label_matrix
 
 
-def convert_cellboxes(predictions, S=7):
+def decode(outputs: torch.Tensor, S: int = 7) -> torch.Tensor:
     """
     Converts bounding boxes output from Yolo with
     an image split size of S into entire image ratios
@@ -295,58 +239,150 @@ def convert_cellboxes(predictions, S=7):
     using 2 for loops iterating range(S) and convert them one
     by one, resulting in a slower but more readable implementation.
     """
-    # TODO: the first dim must be batch size so its either [bs, 1470] or [bs, 7, 7, 30]
-    # in this 7x7 scenario.
-    # assert (
-    #     len(predictions.shape) == 4
-    # ), "predictions must be a 4D tensor with batch size as first dimension"
+    batch_size = outputs.shape[0]
 
-    predictions = predictions.to("cpu")
-    batch_size = predictions.shape[0]
-    predictions = predictions.reshape(batch_size, 7, 7, 30)
-    bboxes1 = predictions[..., 21:25]
-    bboxes2 = predictions[..., 26:30]
-    scores = torch.cat(
-        (predictions[..., 20].unsqueeze(0), predictions[..., 25].unsqueeze(0)),
+    # outputs: either [bs, 7, 7, 30] or [bs, 1470] where 1470 = 7 * 7 * 30 flattened
+    outputs = outputs.detach().cpu()
+    outputs = outputs.reshape(batch_size, 7, 7, 30)
+
+    # bbox_1: [bs, 7, 7, 4] where 4 is [x_grid_offset, y_grid_offset, width, height]
+    bbox_1 = outputs[..., 21:25]
+    bbox_2 = outputs[..., 26:30]
+
+    # obj_scores: [2, bs, 7, 7] the bbox objectness confidence scores
+    # logic: assume S=7, B=2, C=20, then a total of 98 bboxes are predicted
+    # now he reshapes to [2, bs, 7, 7] where the first element is the scores for
+    # the first box and the second element is the scores for the second box.
+    # key: flatten this along the bs dim results in [2 * 49] = 98
+    obj_scores = torch.cat(
+        (outputs[..., 20].unsqueeze(0), outputs[..., 25].unsqueeze(0)),
         dim=0,
     )
-    best_box = scores.argmax(0).unsqueeze(-1)
-    # why the sophistication, but either way if best_box is 0, then bboxes1 will be best_boxes, if best_box is 1, then bboxes2 will be best_boxes
-    best_boxes = bboxes1 * (1 - best_box) + best_box * bboxes2
+
+    # best_bbox_index: [bs, 7, 7, 1]
+    # logic: best_bbox_index is the index of the best box, either 0 or 1 in this case
+    # since we have only 2 bboxes with index 0 and 1.
+    # key: flatten this along the bs dim results in [49] = 49 which is correct since
+    # we choose the best box for each cell, out of 49 cells.
+    best_bbox_index = obj_scores.argmax(0).unsqueeze(-1)
+
+    # best_bbox: [bs, 7, 7, 4]
+    # after all the sophistication, best_bbox is either bbox_1 or bbox_2
+    # depending on the best_bbox_index.
+    # the formula below ensures that if best_bbox_index is 0, then best_bbox is bbox_1
+    # as the bbox_2 -> 0 since best_bbox_index is 0.
+    best_bbox = bbox_1 * (1 - best_bbox_index) + best_bbox_index * bbox_2
+
+    # cell_indices: [bs, 7, 7, 1]
     cell_indices = torch.arange(7).repeat(batch_size, 7, 1).unsqueeze(-1)
 
-    x = 1 / S * (best_boxes[..., :1] + cell_indices)
-    y = 1 / S * (best_boxes[..., 1:2] + cell_indices.permute(0, 2, 1, 3))
-    w_y = best_boxes[..., 2:4]
-    converted_bboxes = torch.cat((x, y, w_y), dim=-1)
-    predicted_class = predictions[..., :20].argmax(-1).unsqueeze(-1)
-    best_confidence = torch.max(
-        predictions[..., 20], predictions[..., 25]
-    ).unsqueeze(-1)
+    # x_grid_offset: [bs, 7, 7, 1]
+    # logic: x_grid_offset is the x offset of the bbox relative to the cell
+    # same for y_grid_offset
+    # key: the logic is clearer now why he wanted to unsqueeze cell_indices to have
+    # an additional dimension, this is for the broadcasting to work (add).
+    x_grid_offset = best_bbox[..., :1]
+    y_grid_offset = best_bbox[..., 1:2]
 
-    converted_preds = torch.cat(
-        (predicted_class, best_confidence, converted_bboxes), dim=-1
+    # x_center: [bs, 7, 7, 1] | y_center: [bs, 7, 7, 1]
+    # logic: we recovered the x_center and y_center from the original yolo format.
+    x_center = 1 / S * (x_grid_offset + cell_indices)
+    y_center = 1 / S * (y_grid_offset + cell_indices.permute(0, 2, 1, 3))
+
+    # wh: [bs, 7, 7, 2]
+    # logic: we recovered the width and height from the original yolo format.
+    # and this remains unchanged anyways.
+    wh = best_bbox[..., 2:4]
+
+    # converted_bboxes: [bs, 7, 7, 4]
+    converted_bboxes = torch.cat((x_center, y_center, wh), dim=-1)
+
+    # FIXME: should here not be the class_id of the best bbox?
+    # class_id: [bs, 7, 7, 1]
+    class_id = outputs[..., :20].argmax(-1).unsqueeze(-1)
+
+    # FIXME: should here not be the best_confidence of the best bbox?
+    # best_confidence: [bs, 7, 7, 1]
+    best_confidence = torch.max(outputs[..., 20], outputs[..., 25]).unsqueeze(
+        -1
     )
 
-    return converted_preds
+    # detected_bboxes: [bs, 7, 7, 6]
+    # logic: the 6 dimensions are [class_id, best_confidence, x_center, y_center, width, height]
+
+    decoded_bbox = torch.cat(
+        (class_id, best_confidence, converted_bboxes), dim=-1
+    )
+
+    # logic: the final form here assumes that we have only 1 bbox per cell, hence [bs, 49, 6]
+    flattened_decoded_bbox = flatten_decoded_bbox(decoded_bbox, S)
+    return flattened_decoded_bbox
 
 
-def cellboxes_to_boxes(out, S=7):
-    converted_pred = convert_cellboxes(out).reshape(out.shape[0], S * S, -1)
-    converted_pred[..., 0] = converted_pred[..., 0].long()
-    all_bboxes = []
+def flatten_decoded_bbox(decoded_bbox: torch.Tensor, S: int) -> torch.Tensor:
+    """Flattens the decoded bbox to [bs, S * S, 6].
 
-    for ex_idx in range(out.shape[0]):
-        bboxes = []
+    Args:
+        decoded_bbox (torch.Tensor): The decoded bbox of shape [bs, S, S, 6].
+        S (int): The grid size.
 
-        for bbox_idx in range(S * S):
-            bboxes.append(
-                [x.item() for x in converted_pred[ex_idx, bbox_idx, :]]
-            )
-        all_bboxes.append(bboxes)
-    all_bboxes = torch.tensor(all_bboxes)
-    return all_bboxes
+    Returns:
+        flattened_decoded_bbox (torch.Tensor): The flattened decoded bbox of shape [bs, S * S, 6].
+    """
 
+    # flattened_decoded_bbox: [bs, 7 * 7, 6] = [bs, 49, 6]
+    flattened_decoded_bbox = decoded_bbox.reshape(
+        decoded_bbox.shape[0], S * S, -1
+    )
+    # turn class_id to int
+    flattened_decoded_bbox[..., 0] = flattened_decoded_bbox[..., 0].long()
+
+    return flattened_decoded_bbox
+
+
+# def decode(label_matrix: torch.Tensor, S: int, B: int, C: int) -> torch.Tensor:
+#     """Convert label matrix to bounding boxes in xywh format.
+
+#     Args:
+#         label_matrix (torch.Tensor): label matrix in YOLO format.
+
+#     Returns:
+#         bboxes (torch.Tensor): bboxes in YOLO format (class_label, x_center, y_center, width, height)
+#                                where coordinates are normalized to [0, 1].
+#     """
+#     bboxes = []
+
+#     # (S, S, 5 * B + C) -> (S, S, 30) if S=7, B=2, C=20
+#     for i, j in itertools.product(range(S), range(S)):
+
+#         # check if objectness is 1
+#         if label_matrix[i, j, 20] == 1 or label_matrix[i, j, 25] == 1:
+
+#             # get class probabilities
+#             class_probabilities = label_matrix[i, j, :20]
+
+#             # get class with highest probability
+#             class_id = torch.argmax(class_probabilities)
+
+#             # get bbox coordinates
+#             bbox_coordinates = (
+#                 label_matrix[i, j, 21:25]
+#                 if label_matrix[i, j, 20] == 1
+#                 else label_matrix[i, j, 26:30]
+#             )
+
+#             # unpack bbox coordinates
+#             x_grid_offset, y_grid_offset, width, height = bbox_coordinates
+
+#             # convert bbox coordinates to xywh
+#             x_center = (j + x_grid_offset) / S
+#             y_center = (i + y_grid_offset) / S
+
+#             bboxes.append(
+#                 torch.tensor([class_id, x_center, y_center, width, height])
+#             )
+
+#     return torch.stack(bboxes)
 
 if __name__ == "__main__":
     csv_file = "./datasets/pascal_voc_128/pascal_voc_128.csv"
@@ -395,7 +431,7 @@ if __name__ == "__main__":
 
         print(f"images shape: {images.shape}, bboxes shape: {bboxes.shape}")
 
-        decoded_bboxes = cellboxes_to_boxes(bboxes)
+        decoded_bboxes = decode(bboxes)
         print(f"decoded bboxes: {decoded_bboxes.shape}")
         print(f"decoded bboxes: {decoded_bboxes}")
 

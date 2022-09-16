@@ -9,10 +9,11 @@ List is structured by tuples and lastly int with number of repeats
 """
 
 import torch
-import torch.nn as nn
+from torch import nn
 import torchinfo
+from typing import List, Optional
 
-architecture_config = [
+DEFAULT_ARCHITECTURE = [
     (7, 64, 2, 3),
     "M",
     (3, 192, 1, 1),
@@ -38,21 +39,26 @@ class CNNBlock(nn.Module):
     def __init__(self, in_channels, out_channels, **kwargs):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
-        # very important https://discuss.pytorch.org/t/performance-highly-degraded-when-eval-is-activated-in-the-test-phase/3323/62
-        self.batchnorm = nn.BatchNorm2d(out_channels, track_running_stats=False)
+        # https://tinyurl.com/ap22f8nf on set track_running_stats to False
+        self.batchnorm = nn.BatchNorm2d(
+            out_channels, track_running_stats=False
+        )
         self.leakyrelu = nn.LeakyReLU(0.1)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass."""
         return self.leakyrelu(self.batchnorm(self.conv(x)))
 
 
-class Yolov1(nn.Module):
+class Yolov1Darknet(nn.Module):
     def __init__(
         self,
+        architecture: Optional[List] = None,
         in_channels: int = 3,
         grid_size: int = 7,
         num_bboxes_per_grid: int = 2,
         num_classes: int = 20,
+        init_weights: bool = False,
     ):
         """From Aladdin's repo:
         https://github.com/aladdinpersson/Machine-Learning-Collection/blob/master/ML/Pytorch/object_detection/YOLO/dataset.py
@@ -68,13 +74,20 @@ class Yolov1(nn.Module):
         # S, B, C
         super().__init__()
 
-        self.architecture = architecture_config
+        self.architecture = architecture
         self.in_channels = in_channels
         self.S = grid_size
         self.B = num_bboxes_per_grid
         self.C = num_classes
+
+        if self.architecture is None:
+            self.architecture = DEFAULT_ARCHITECTURE
+
         self.darknet = self._create_conv_layers(self.architecture)
         self.fcs = self._create_fcs(self.S, self.B, self.C)
+
+        if init_weights:
+            self._initialize_weights()
 
     def forward(self, x):
         x = self.darknet(x)
@@ -130,18 +143,40 @@ class Yolov1(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def _create_fcs(self, S: int, B: int, C: int) -> torch.nn.Sequential:
-        # In original paper this should be
-        # nn.Linear(1024*S*S, 4096),
-        # nn.LeakyReLU(0.1),
-        # nn.Linear(4096, S*S*(B*5+C))
+    @staticmethod
+    def _create_fcs(S: int, B: int, C: int) -> torch.nn.Sequential:
+        """Create the fully connected layers.
+
+        Note:
+        In original paper this should be
+            nn.Linear(1024*S*S, 4096),
+            nn.LeakyReLU(0.1),
+            nn.Linear(4096, S*S*(B*5+C))
+        """
+
         return nn.Sequential(
             nn.Flatten(),
             nn.Linear(1024 * S * S, 496),
             nn.Dropout(0.0),
             nn.LeakyReLU(0.1),
             nn.Linear(496, S * S * (C + B * 5)),
+            # nn.Sigmoid(), 增加sigmoid函数是为了将输出全部映射到(0,1)之间，因为如果出现负数或太大的数，后续计算loss会很麻烦
         )
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(
+                    m.weight, mode="fan_in", nonlinearity="leaky_relu"
+                )
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
 
 
 if __name__ == "__main__":
@@ -155,7 +190,7 @@ if __name__ == "__main__":
 
     x = torch.zeros(batch_size, in_channels, image_size, image_size)
     y_trues = torch.zeros(batch_size, S, S, B * 5 + C)
-    yolov1 = Yolov1(
+    yolov1 = Yolov1Darknet(
         in_channels=in_channels,
         grid_size=S,
         num_bboxes_per_grid=B,

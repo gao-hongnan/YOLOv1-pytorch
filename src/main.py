@@ -4,7 +4,7 @@ import torch.optim as optim
 import torchvision.transforms.functional as FT
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-from model import Yolov1
+from model import Yolov1Darknet
 from train import train_one_epoch, valid_one_epoch
 from dataset import VOCDataset, get_transform
 from utils import (
@@ -47,7 +47,7 @@ else:
 
 
 def main():
-    model = Yolov1(
+    model = Yolov1Darknet(
         in_channels=3, grid_size=7, num_bboxes_per_grid=2, num_classes=20
     ).to(DEVICE)
     optimizer = optim.Adam(

@@ -1,13 +1,9 @@
 """
 Implementation of Yolo Loss Function from the original yolo paper
 """
-
-from typing import List
 import torch
-import torch.nn as nn
-
-
-from utils import intersection_over_union, calculate_iou
+from torch import nn
+from utils import intersection_over_union
 
 
 class YoloLoss(nn.Module):
@@ -16,7 +12,7 @@ class YoloLoss(nn.Module):
     """
 
     def __init__(self, S=7, B=2, C=20):
-        super(YoloLoss, self).__init__()
+        super().__init__()
         self.mse = nn.MSELoss(reduction="sum")
 
         """
@@ -179,8 +175,8 @@ class YoloLoss(nn.Module):
             y_preds[..., 26:30], y_trues[..., 21:25]
         )
         # iou_b3 = calculate_iou(y_preds[..., 26:30], y_trues[..., 21:25])
-        #print(f"iou_b1: {iou_b1}")
-        #print(f"iou_b2: {iou_b2}")
+        # print(f"iou_b1: {iou_b1}")
+        # print(f"iou_b2: {iou_b2}")
         # print(f"iou_b3: {iou_b3}")
         # concatenate the iou_b1 and iou_b2 tensors into a tensor array.
         ious = torch.cat([iou_b1.unsqueeze(0), iou_b2.unsqueeze(0)], dim=0)
@@ -237,8 +233,7 @@ class YoloLoss(nn.Module):
         )
 
         return total_loss
-    
-    
+
 
 # class YOLOv1Loss(nn.Module):
 #     def __init__(

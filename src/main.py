@@ -22,47 +22,38 @@ print(f"Using {DEVICE}")
 
 if DEBUG:
     BATCH_SIZE = 4  # 64 in original paper but use 16
-    NUM_WORKERS = 0  # 0 if debug
     EPOCHS = 10
-    # Hyperparameters etc.
-    LEARNING_RATE = 2e-5
 
-    WEIGHT_DECAY = 0
-    PIN_MEMORY = True
-    SHUFFLE = False
-    DROP_LAST = True
-    seed_all(seed=1992)
 else:
-    # Hyperparameters etc.
-    LEARNING_RATE = 2e-5
     BATCH_SIZE = 4  # 64 in original paper but use 16
-    WEIGHT_DECAY = 0
     EPOCHS = 100
-    NUM_WORKERS = 2  # 0 if debug
-    PIN_MEMORY = True
-    SHUFFLE = False
-    DROP_LAST = True
 
-    seed_all(seed=1992)
+# Hyperparameters etc.
+LEARNING_RATE = 2e-5
+WEIGHT_DECAY = 0
+NUM_WORKERS = 0
+seed_all(seed=1992)
 
 
-def main():
+def main(debug: bool = True):
+    S, B, C = 7, 2, 20
+
     model = Yolov1Darknet(
         in_channels=3, grid_size=7, num_bboxes_per_grid=2, num_classes=20
     ).to(DEVICE)
+
     optimizer = optim.Adam(
         model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
-    loss_fn = YoloLoss()
+    loss_fn = YoloLoss(S, B, C)
 
+    ### Load Data ###
     csv_file = "./datasets/pascal_voc_128/pascal_voc_128.csv"
     images_dir = "./datasets/pascal_voc_128/images"
     labels_dir = "./datasets/pascal_voc_128/labels"
 
-    S, B, C = 7, 2, 20
-
+    ### Transforms ###
     train_transforms = get_transform(mode="train")
-
     valid_transforms = get_transform(mode="valid")
 
     voc_dataset_train = VOCDataset(
@@ -86,46 +77,43 @@ def main():
         mode="valid",
     )
 
+    if debug:
+        voc_dataset_debug = VOCDataset(
+            csv_file,
+            images_dir,
+            labels_dir,
+            valid_transforms,
+            S,
+            B,
+            C,
+            mode="valid",
+        )
+        voc_dataloader_debug = DataLoader(
+            dataset=voc_dataset_debug,
+            batch_size=BATCH_SIZE,
+            shuffle=False,
+            num_workers=NUM_WORKERS,
+            pin_memory=True,
+        )
+
     voc_dataloader_train = DataLoader(
         dataset=voc_dataset_train,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
-        pin_memory=PIN_MEMORY,
-        shuffle=SHUFFLE,
-        drop_last=DROP_LAST,
+        pin_memory=True,
+        shuffle=True,
+        drop_last=True,
     )
     voc_dataloader_valid = DataLoader(
         dataset=voc_dataset_valid,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
-        pin_memory=PIN_MEMORY,
+        pin_memory=True,
         shuffle=False,
-        drop_last=DROP_LAST,
+        drop_last=True,
     )
 
-    #     # HN: check what is inside loader
-    #     for batch in train_loader:
-    #         image, label = batch
-    #         print(image.shape)
-    #         print(label.shape)
-
-    #         break
-
-    #     test_loader = DataLoader(
-    #         dataset=test_dataset,
-    #         batch_size=BATCH_SIZE,
-    #         num_workers=NUM_WORKERS,
-    #         pin_memory=PIN_MEMORY,
-    #         shuffle=False,
-    #         drop_last=True,
-    #     )
-
     for epoch in range(EPOCHS):
-
-        # pred_boxes, target_boxes = get_bboxes(
-        #     train_loader, model, iou_threshold=0.5, threshold=0.4
-        # )
-
         # mean_avg_prec = mean_average_precision(
         #     pred_boxes, target_boxes, iou_threshold=0.5, box_format="midpoint"
         # )
@@ -140,21 +128,21 @@ def main():
         #    import time
         #    time.sleep(10)
 
-        if DEBUG:
+        if debug:
             train_one_epoch(
-                voc_dataloader_valid, model, optimizer, loss_fn, epoch, DEVICE
+                voc_dataloader_debug, model, optimizer, loss_fn, epoch, DEVICE
             )
             valid_one_epoch(
-                voc_dataloader_valid, model, optimizer, loss_fn, epoch, DEVICE
+                voc_dataloader_debug, model, optimizer, loss_fn, epoch, DEVICE
             )
         else:
             train_one_epoch(
                 voc_dataloader_train, model, optimizer, loss_fn, epoch, DEVICE
             )
             valid_one_epoch(
-                voc_dataloader_train, model, optimizer, loss_fn, epoch, DEVICE
+                voc_dataloader_valid, model, optimizer, loss_fn, epoch, DEVICE
             )
 
 
 if __name__ == "__main__":
-    main()
+    main(debug=True)

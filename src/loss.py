@@ -11,7 +11,7 @@ class YoloLoss(nn.Module):
     Calculate the loss for yolo (v1) model following https://github.com/aladdinpersson/Machine-Learning-Collection/blob/master/ML/Pytorch/object_detection/YOLO/loss.py
     """
 
-    def __init__(self, S=7, B=2, C=20):
+    def __init__(self, S: int = 7, B: int = 2, C: int = 20):
         super().__init__()
         self.mse = nn.MSELoss(reduction="sum")
 
@@ -148,9 +148,7 @@ class YoloLoss(nn.Module):
         )
         return class_loss
 
-    def forward(
-        self, y_preds: torch.Tensor, y_trues: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, y_preds: torch.Tensor, y_trues: torch.Tensor) -> torch.Tensor:
         """
         Calculate the loss for the yolo model.
 
@@ -168,12 +166,8 @@ class YoloLoss(nn.Module):
         # Calculate IoU for the two predicted bounding boxes with y_trues bbox:
         # iou_b1 = iou of bbox 1 and y_trues bbox
         # iou_b2 = iou of bbox 2 and y_trues bbox
-        iou_b1 = intersection_over_union(
-            y_preds[..., 21:25], y_trues[..., 21:25]
-        )
-        iou_b2 = intersection_over_union(
-            y_preds[..., 26:30], y_trues[..., 21:25]
-        )
+        iou_b1 = intersection_over_union(y_preds[..., 21:25], y_trues[..., 21:25])
+        iou_b2 = intersection_over_union(y_preds[..., 26:30], y_trues[..., 21:25])
         # iou_b3 = calculate_iou(y_preds[..., 26:30], y_trues[..., 21:25])
         # print(f"iou_b1: {iou_b1}")
         # print(f"iou_b2: {iou_b2}")
@@ -217,9 +211,7 @@ class YoloLoss(nn.Module):
         #   FOR CLASS LOSS   #
         # ================== #
 
-        class_loss = self._get_class_loss(
-            y_trues, y_preds, vectorized_obj_indicator_ij
-        )
+        class_loss = self._get_class_loss(y_trues, y_preds, vectorized_obj_indicator_ij)
         # print(self.lambda_coord * box_loss)
         # print(object_loss)
         # print(self.lambda_noobj * no_object_loss)

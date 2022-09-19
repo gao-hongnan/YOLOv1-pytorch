@@ -64,6 +64,7 @@ def main():
     train_transforms = get_transform(mode="train")
 
     valid_transforms = get_transform(mode="valid")
+
     voc_dataset_train = VOCDataset(
         csv_file,
         images_dir,

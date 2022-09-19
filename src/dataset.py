@@ -6,6 +6,7 @@
 2. Train and validation column in csv is hardcoded, in actual training need to be random split.
 3. Note that this implementation assumes S=7, B=2, C=20 and if you change then the code will break since
 tensor slicing are performed based on this assumption.
+4. Assumes train df has a column called train_flag.
 """
 import torch
 import os
@@ -17,6 +18,8 @@ import torchvision
 import matplotlib.pyplot as plt
 from utils import yolo2voc
 from typing import List
+import torchvision.transforms.functional as FT
+import numpy as np
 
 # FIXME: see the mzbai's repo to collate fn properly so can use albu!
 def get_transform(mode: str, image_size: int = 448) -> T.Compose:
@@ -134,6 +137,12 @@ class VOCDataset(torch.utils.data.Dataset):
         return bboxes
 
     def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Returns the image and the bboxes tensor for the given index.
+
+        Returns:
+            image (torch.Tensor): Image tensor of shape (3, image_size, image_size).
+            bboxes (torch.Tensor): Bounding boxes tensor of shape (S, S, 5 * B + C).
+        """
         image_path = os.path.join(
             self.images_dir, self.df.loc[index, "image_id"]
         )
@@ -147,12 +156,12 @@ class VOCDataset(torch.utils.data.Dataset):
         bboxes = self.strip_label_path(label_path)
 
         if self.transforms:
+            # image: (3, image_size, image_size)
             image = self.transforms(image)
+            # bboxes: [num_bbox, 5] where 5 is [class_id, x, y, width, height] yolo format
             bboxes = torch.tensor(bboxes, dtype=torch.float)
 
-        # bboxes: [num_bbox, 5] where 5 is [class_id, x, y, width, height] yolo format
         bboxes = encode(bboxes, self.S, self.B, self.C)
-
         return image, bboxes
 
 
@@ -203,7 +212,7 @@ def encode(bboxes: torch.Tensor, S: int, B: int, C: int) -> torch.Tensor:
         # print(f"class_id: {class_id}")
         # print(f"x_center: {x_center} y_center: {y_center}")
         # print(f"width: {width} height: {height}")
-        # print(f"x_grid: {x_grid} y_grid: {y_grid}")
+        print(f"x_grid: {x_grid} y_grid: {y_grid}")
         # print(f"x_grid_offset: {x_grid_offset} y_grid_offset: {y_grid_offset}")
 
         # 将第gridy行，gridx列的网格设置为负责当前ground truth的预测，置信度和对应类别概率均置为1
@@ -441,6 +450,9 @@ if __name__ == "__main__":
 
         image_grid = []
         for image, voc_bbox in zip(images, voc_bboxes):
+            image = torch.from_numpy(
+                    np.asarray(FT.to_pil_image(image))
+                ).permute(2, 0, 1)
             overlayed_image = torchvision.utils.draw_bounding_boxes(
                 image,
                 voc_bbox,

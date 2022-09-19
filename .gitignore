@@ -114,3 +114,6 @@ site/
 
 # Airflow
 airflow/airflow.db
+
+# zip
+*.zip

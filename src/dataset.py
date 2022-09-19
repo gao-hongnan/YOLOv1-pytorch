@@ -7,6 +7,7 @@
 3. Note that this implementation assumes S=7, B=2, C=20 and if you change then the code will break since
 tensor slicing are performed based on this assumption.
 4. Assumes train df has a column called train_flag.
+5. If diff num of classes, need to recode the encode and decode...
 """
 import torch
 import os
@@ -212,7 +213,7 @@ def encode(bboxes: torch.Tensor, S: int, B: int, C: int) -> torch.Tensor:
         # print(f"class_id: {class_id}")
         # print(f"x_center: {x_center} y_center: {y_center}")
         # print(f"width: {width} height: {height}")
-        print(f"x_grid: {x_grid} y_grid: {y_grid}")
+        # print(f"x_grid: {x_grid} y_grid: {y_grid}")
         # print(f"x_grid_offset: {x_grid_offset} y_grid_offset: {y_grid_offset}")
 
         # 将第gridy行，gridx列的网格设置为负责当前ground truth的预测，置信度和对应类别概率均置为1

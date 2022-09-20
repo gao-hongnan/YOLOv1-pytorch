@@ -41,7 +41,7 @@ def main(debug: bool = True):
     optimizer = torch.optim.Adam(
         model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
-    # loss_fn = YoloLoss(S, B, C)
+    #loss_fn = YoloLoss(S, B, C)
     loss_fn = YOLOv1Loss(S, B, C)
 
     ### Load Data ###

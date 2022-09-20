@@ -78,15 +78,16 @@ def main(debug: bool = True):
     )
 
     if debug:
-        voc_dataset_debug = VOCDataset(
-            csv_file,
-            images_dir,
-            labels_dir,
-            valid_transforms,
-            S,
-            B,
-            C,
-            mode="valid",
+        # remember to convert to list as __getitem__ takes in index as type int
+        subset_indices = torch.arange(32)
+        # purposely pick easy images for the 1st batch to illustrate for audience
+        subset_indices[1] = 10
+        subset_indices[2] = 12
+        subset_indices[3] = 18
+        subset_indices = subset_indices.tolist()
+
+        voc_dataset_debug = torch.utils.data.Subset(
+            voc_dataset_train, subset_indices
         )
         voc_dataloader_debug = DataLoader(
             dataset=voc_dataset_debug,

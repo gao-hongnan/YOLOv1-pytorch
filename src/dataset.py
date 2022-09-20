@@ -21,6 +21,7 @@ from utils import yolo2voc
 from typing import List
 import torchvision.transforms.functional as FT
 import numpy as np
+from torch.utils.data import DataLoader
 
 # FIXME: see the mzbai's repo to collate fn properly so can use albu!
 def get_transform(mode: str, image_size: int = 448) -> T.Compose:
@@ -62,7 +63,7 @@ class VOCDataset(torch.utils.data.Dataset):
         csv_file: str,
         images_dir: str,
         labels_dir: str,
-        transforms,
+        transforms: T.Compose,
         S: int = 7,
         B: int = 2,
         C: int = 20,
@@ -95,19 +96,10 @@ class VOCDataset(torch.utils.data.Dataset):
         self.df = self.get_df()
 
     def get_df(self) -> pd.DataFrame:
-        """This method returns the train/valid/test dataframe according to the mode.
-
-        Returns:
-            pd.DataFrame: The dataframe.
-        """
+        """This method returns the train/valid/test dataframe according to the mode."""
 
         df = pd.read_csv(self.csv_file)
-
-        if self.mode == "train":
-            return df[df["train_flag"] == self.mode].reset_index(drop=True)
-
-        if self.mode == "valid":
-            return df[df["train_flag"] == self.mode].reset_index(drop=True)
+        return df[df["train_flag"] == self.mode].reset_index(drop=True)
 
     def __len__(self) -> int:
         return len(self.df)
@@ -425,7 +417,7 @@ if __name__ == "__main__":
     SHUFFLE = False
     DROP_LAST = True
 
-    train_loader = torch.utils.data.DataLoader(
+    train_loader = DataLoader(
         dataset=voc_dataset_train,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,
@@ -452,8 +444,8 @@ if __name__ == "__main__":
         image_grid = []
         for image, voc_bbox in zip(images, voc_bboxes):
             image = torch.from_numpy(
-                    np.asarray(FT.to_pil_image(image))
-                ).permute(2, 0, 1)
+                np.asarray(FT.to_pil_image(image))
+            ).permute(2, 0, 1)
             overlayed_image = torchvision.utils.draw_bounding_boxes(
                 image,
                 voc_bbox,

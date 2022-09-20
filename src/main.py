@@ -1,6 +1,5 @@
 import torch
 import torchvision.transforms as transforms
-import torch.optim as optim
 import torchvision.transforms.functional as FT
 from tqdm import tqdm
 from torch.utils.data import DataLoader
@@ -16,17 +15,8 @@ from utils import (
 from loss import YoloLoss
 
 DEBUG = True
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-# DEVICE = "mps" # if macos m1
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"  # "mps" # if macos m1
 print(f"Using {DEVICE}")
-
-if DEBUG:
-    BATCH_SIZE = 4  # 64 in original paper but use 16
-    EPOCHS = 10
-
-else:
-    BATCH_SIZE = 4  # 64 in original paper but use 16
-    EPOCHS = 100
 
 # Hyperparameters etc.
 LEARNING_RATE = 2e-5
@@ -36,13 +26,19 @@ seed_all(seed=1992)
 
 
 def main(debug: bool = True):
-    S, B, C = 7, 2, 20
+    if debug:
+        BATCH_SIZE = 4
+        EPOCHS = 10
+    else:
+        BATCH_SIZE = 4
+        EPOCHS = 100
 
+    S, B, C = 7, 2, 20
     model = Yolov1Darknet(
         in_channels=3, grid_size=7, num_bboxes_per_grid=2, num_classes=20
     ).to(DEVICE)
 
-    optimizer = optim.Adam(
+    optimizer = torch.optim.Adam(
         model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
     loss_fn = YoloLoss(S, B, C)
@@ -146,4 +142,4 @@ def main(debug: bool = True):
 
 
 if __name__ == "__main__":
-    main(debug=True)
+    main(debug=DEBUG)

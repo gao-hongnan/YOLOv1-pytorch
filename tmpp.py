@@ -98,3 +98,7 @@ if batch_idx == 0:
     # plt.show()
 
     # END DECODE
+
+
+def postprocess(nms: bool = True):
+    pass

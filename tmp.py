@@ -304,21 +304,6 @@ def plot_images_from_dataloader(
     plt.show()
 
 
-def make_image_grid_with_bboxes(
-    inputs: torch.Tensor, targets: torch.Tensor, image_size: int = 448
-):
-    inputs = inputs.detach().cpu()
-
-    targets_yolo = decode(targets.detach().cpu())
-    targets_voc = yolo2voc(
-        targets_yolo[..., 2:], height=image_size, width=image_size
-    )
-
-    input = torch.from_numpy(np.asarray(FT.to_pil_image(input))).permute(
-        2, 0, 1
-    )
-
-
 if __name__ == "__main__":
     csv_file = "./datasets/pascal_voc_128/pascal_voc_128.csv"
     images_dir = "./datasets/pascal_voc_128/images"

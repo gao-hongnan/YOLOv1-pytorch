@@ -18,6 +18,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from config import config
+from torch.utils.data import DataLoader
+from model import Yolov1Darknet
+from loss import YoloLoss
 
 ClassMap = config.ClassMap()
 
@@ -25,7 +28,12 @@ plt.rcParams["savefig.bbox"] = "tight"
 
 
 def train_one_epoch(
-    train_loader, model, optimizer, criterion, epoch, device, nms: bool = True
+    train_loader: DataLoader,
+    model: Yolov1Darknet,
+    optimizer: torch.optim,
+    criterion: YoloLoss,
+    epoch: int,
+    device: str,
 ) -> List[float]:
     """Train the model for one epoch.
 
@@ -122,38 +130,13 @@ def valid_one_epoch(
         # [class_id, obj_conf, x, y, w, h] recall this is in yolo format
         # so need to convert to voc for plotting (easier)
         y_trues_decoded = decode(y_trues.detach().cpu())
-
-        # FIXME: here uses yolo2voc which is mutable and hence
-        # if I print y_trues_decoded_yolo_format, y_preds_decoded_voc_format
-        # they both the same after.
-        # note yolo2voc expects [x, y, w, h] format so need slice
-        # y_trues_decoded_voc: (batch_size, 7, 7, 4) -> (batch_size, 7 * 7, 4)
-        y_trues_decoded_voc = yolo2voc(
-            y_trues_decoded[..., 2:],
-            height=inputs.shape[2],
-            width=inputs.shape[3],
-        )
         y_preds_decoded = decode(y_preds.detach().cpu())
-        y_preds_decoded_voc = yolo2voc(
-            y_preds_decoded[..., 2:],
-            height=inputs.shape[2],
-            width=inputs.shape[3],
-        )
 
         if batch_idx == 0:
-
             image_grid = []
             # TODO: HONGNAN: remember find a way to turn TOTENSOR back to proper uint8 image? how?
-            for (
-                input,
-                y_true_decoded_voc_format,
-                y_pred_decoded_yolo_format,
-                y_pred_decoded_voc_format,
-            ) in zip(
-                inputs,
-                y_trues_decoded_voc,
-                y_preds_decoded,
-                y_preds_decoded_voc,
+            for (input, y_true_decoded, y_pred_decoded) in zip(
+                inputs, y_trues_decoded, y_preds_decoded
             ):
                 # FIXME: find way to turn Tensor back to uint8 image without using this.
                 # input: (3, 448, 448)
@@ -163,14 +146,14 @@ def valid_one_epoch(
 
                 # nms_bbox_pred: (N, 6) where N is number of bboxes after nms
                 #                       and 6 is [class, obj_conf, x, y, w, h]
-                nms_bbox_pred = non_max_suppression(
-                    y_pred_decoded_yolo_format,
+                y_pred_decoded_nms = non_max_suppression(
+                    y_pred_decoded,
                     iou_threshold=0.5,
                     obj_threshold=0.4,
                     bbox_format="yolo",
                 )
-
-                num_bboxes_after_nms = nms_bbox_pred.shape[0]
+                class_ids = y_pred_decoded_nms[:, 0]
+                num_bboxes_after_nms = y_pred_decoded_nms.shape[0]
 
                 if num_bboxes_after_nms == 0:
                     # if no bboxes after nms, then just plot the image
@@ -182,24 +165,33 @@ def valid_one_epoch(
                 else:
                     class_names = [
                         ClassMap.classes_map[int(class_idx.item())]
-                        for class_idx in nms_bbox_pred[:, 0]
+                        for class_idx in class_ids
                     ]
                     colors = ["red"] * num_bboxes_after_nms
 
                 font_path = "./07558_CenturyGothic.ttf"
 
-                # num_colors =
-                # print(f"nms: {nms_bbox_pred[...,2:]}")
+                y_true_decoded_voc = yolo2voc(
+                    y_true_decoded[..., 2:],
+                    height=inputs.shape[2],
+                    width=inputs.shape[3],
+                )
                 overlayed_image_true = torchvision.utils.draw_bounding_boxes(
                     input,
-                    y_true_decoded_voc_format,
+                    y_true_decoded_voc,
                     # colors=colors,
                     width=6,
                     # labels=class_names,
                 )
+
+                y_pred_decoded_nms_voc = yolo2voc(
+                    y_pred_decoded_nms[..., 2:],
+                    height=inputs.shape[2],
+                    width=inputs.shape[3],
+                )
                 overlayed_image_pred = torchvision.utils.draw_bounding_boxes(
                     input,
-                    nms_bbox_pred[..., 2:],
+                    y_pred_decoded_nms_voc,
                     colors=colors,
                     width=6,
                     labels=class_names,

@@ -39,29 +39,6 @@ def seed_all(seed: int = 1992) -> None:
     torch.backends.cudnn.enabled = False
 
 
-def calculate_iou(bbox1, bbox2):
-    # bbox: x y w h
-    bbox1, bbox2 = (
-        bbox1.cpu().detach().numpy().tolist(),
-        bbox2.cpu().detach().numpy().tolist(),
-    )
-
-    area1 = bbox1[2] * bbox1[3]  # bbox1's area
-    area2 = bbox2[2] * bbox2[3]  # bbox2's area
-
-    max_left = max(bbox1[0] - bbox1[2] / 2, bbox2[0] - bbox2[2] / 2)
-    min_right = min(bbox1[0] + bbox1[2] / 2, bbox2[0] + bbox2[2] / 2)
-    max_top = max(bbox1[1] - bbox1[3] / 2, bbox2[1] - bbox2[3] / 2)
-    min_bottom = min(bbox1[1] + bbox1[3] / 2, bbox2[1] + bbox2[3] / 2)
-
-    if max_left >= min_right or max_top >= min_bottom:
-        return 0
-    else:
-        # iou = intersect / union
-        intersect = (min_right - max_left) * (min_bottom - max_top)
-        return intersect / (area1 + area2 - intersect)
-
-
 def intersection_over_union(
     bbox_1: torch.Tensor, bbox_2: torch.Tensor, bbox_format: str = "yolo"
 ):
@@ -142,6 +119,7 @@ def non_max_suppression(
                        and note the sequence must follow closely to the output of your
                        decode function.
 
+        bboxes_after_nms: (N, 6) where N is the number of bounding boxes after NMS (remaining).
 
 
     Args:
@@ -378,7 +356,11 @@ def yolo2voc(
     """
 
     # otherwise all value will be 0 as voc_pascal dtype is np.int
-    # bboxes = bboxes.copy().astype(float)
+    bboxes = (
+        bboxes.copy().astype(float)
+        if isinstance(bboxes, np.ndarray)
+        else bboxes.clone().float()
+    )
 
     bboxes[..., 0] -= bboxes[..., 2] / 2
     bboxes[..., 1] -= bboxes[..., 3] / 2

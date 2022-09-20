@@ -347,12 +347,23 @@ class YOLOv1Loss(nn.Module):
                             + self.mse(y_ij, yhat_ij)
                         )
 
+                        # make them abs as sometimes the preds can be negative if no sigmoid layer.
+                        # add 1e-6 for stability
                         self.bbox_wh_loss = (
                             self.bbox_wh_loss
-                            + self.mse(torch.sqrt(w_ij), torch.sqrt(what_ij))
-                            + self.mse(torch.sqrt(h_ij), torch.sqrt(hhat_ij))
+                            + self.mse(
+                                torch.sqrt(w_ij),
+                                torch.sqrt(torch.abs(what_ij + 1e-6)),
+                            )
+                            + self.mse(
+                                torch.sqrt(h_ij),
+                                torch.sqrt(torch.abs(hhat_ij + 1e-6)),
+                            )
                         )
 
+                        print("C_ij", C_ij)
+                        print("Chat_ij", Chat_ij)
+                        print("mse cij chatij", self.mse(C_ij, Chat_ij))
                         self.object_conf_loss = (
                             self.object_conf_loss + self.mse(C_ij, Chat_ij)
                         )
@@ -377,13 +388,14 @@ class YOLOv1Loss(nn.Module):
                     else:
                         # no_object_conf is constructed to be 0 in ground truth y
                         # can use mse but need to put torch.tensor(0) to gpu
-                        self.object_conf_loss = (
-                            self.object_conf_loss
+                        self.no_object_conf_loss = (
+                            self.no_object_conf_loss
                             + torch.sum(
                                 (0 - y_preds[batch_index, row, col, [4, 9]])
                                 ** 2
                             )
                         )
+                        pass
 
         total_loss = (
             self.lambda_coord * self.bbox_xy_offset_loss

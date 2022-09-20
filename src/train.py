@@ -9,13 +9,7 @@ import os
 import sys
 
 sys.path.insert(1, os.getcwd())
-from utils import (
-    non_max_suppression,
-    mean_average_precision,
-    intersection_over_union,
-    yolo2voc,
-)
-from loss import YoloLoss
+from utils import non_max_suppression, yolo2voc
 from typing import *
 import time
 from dataset import decode
@@ -30,19 +24,8 @@ ClassMap = config.ClassMap()
 plt.rcParams["savefig.bbox"] = "tight"
 
 
-def show(imgs):
-    if not isinstance(imgs, list):
-        imgs = [imgs]
-    fig, axs = plt.subplots(ncols=len(imgs), squeeze=False)
-    for i, img in enumerate(imgs):
-        img = img.detach()
-        img = FT.to_pil_image(img)
-        axs[0, i].imshow(np.asarray(img))
-        axs[0, i].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
-
-
 def train_one_epoch(
-    train_loader, model, optimizer, criterion, epoch, device
+    train_loader, model, optimizer, criterion, epoch, device, nms: bool = True
 ) -> List[float]:
     """Train the model for one epoch.
 
@@ -79,6 +62,11 @@ def train_one_epoch(
         # y_preds: (batch_size, 7 * 7 * 30) -> (batch_size, 1470)
         y_preds = model(inputs)
 
+        # y_trues_decoded: (batch_size, 7, 7, 6) -> (batch_size, 7 * 7, 6)
+        # [class_id, obj_conf, x, y, w, h]
+        y_trues_decoded = decode(y_trues.detach().cpu())
+        y_preds_decoded = decode(y_preds.detach().cpu())
+
         loss = criterion(y_preds, y_trues)
 
         optimizer.zero_grad()
@@ -102,7 +90,7 @@ def train_one_epoch(
 
 @torch.inference_mode(mode=True)
 def valid_one_epoch(
-    valid_loader, model, optimizer, criterion, epoch, device
+    valid_loader, model, optimizer, criterion, epoch, device, nms: bool = True
 ) -> List[float]:
     # same as train_one_epoch
     model.eval()
@@ -128,30 +116,32 @@ def valid_one_epoch(
         # update progress bar
         valid_bar.set_postfix(loss=loss.item())
 
+        ### DECODE ###
+        inputs = inputs.detach().cpu()
+        # y_trues_decoded: (batch_size, 7, 7, 6) -> (batch_size, 7 * 7, 6)
+        # [class_id, obj_conf, x, y, w, h] recall this is in yolo format
+        # so need to convert to voc for plotting (easier)
+        y_trues_decoded = decode(y_trues.detach().cpu())
+
+        # FIXME: here uses yolo2voc which is mutable and hence
+        # if I print y_trues_decoded_yolo_format, y_preds_decoded_voc_format
+        # they both the same after.
+        # note yolo2voc expects [x, y, w, h] format so need slice
+        # y_trues_decoded_voc: (batch_size, 7, 7, 4) -> (batch_size, 7 * 7, 4)
+        y_trues_decoded_voc = yolo2voc(
+            y_trues_decoded[..., 2:],
+            height=inputs.shape[2],
+            width=inputs.shape[3],
+        )
+        y_preds_decoded = decode(y_preds.detach().cpu())
+        y_preds_decoded_voc = yolo2voc(
+            y_preds_decoded[..., 2:],
+            height=inputs.shape[2],
+            width=inputs.shape[3],
+        )
+
         if batch_idx == 0:
-            # DECODE
 
-            # y_trues_decoded_yolo_format: (bs, S * S, 6) -> 6 is [class, obj_conf, x, y, w, w]
-            # y_trues_decoded_voc_format: (bs, S * S, 4)
-            # y_preds_decoded_yolo_format: (bs, S * S, 6)
-            # y_preds_decoded_voc_format: (bs, S * S, 4)
-
-            y_trues_decoded_yolo_format = decode(y_trues.detach().cpu())
-
-            # FIXME: here uses yolo2voc which is mutable and hence
-            # if I print y_trues_decoded_yolo_format, y_preds_decoded_voc_format
-            # they both the same after.
-            # note yolo2voc expects [x, y, w, h] format so need slice
-            y_trues_decoded_voc_format = yolo2voc(
-                y_trues_decoded_yolo_format[..., 2:], height=448, width=448
-            )
-
-            y_preds_decoded_yolo_format = decode(y_preds.detach().cpu())
-            y_preds_decoded_voc_format = yolo2voc(
-                y_preds_decoded_yolo_format[..., 2:], height=448, width=448
-            )
-
-            inputs = inputs.detach().cpu()
             image_grid = []
             # TODO: HONGNAN: remember find a way to turn TOTENSOR back to proper uint8 image? how?
             for (
@@ -161,9 +151,9 @@ def valid_one_epoch(
                 y_pred_decoded_voc_format,
             ) in zip(
                 inputs,
-                y_trues_decoded_voc_format,
-                y_preds_decoded_yolo_format,
-                y_preds_decoded_voc_format,
+                y_trues_decoded_voc,
+                y_preds_decoded,
+                y_preds_decoded_voc,
             ):
                 # FIXME: find way to turn Tensor back to uint8 image without using this.
                 # input: (3, 448, 448)
@@ -177,7 +167,7 @@ def valid_one_epoch(
                     y_pred_decoded_yolo_format,
                     iou_threshold=0.5,
                     obj_threshold=0.4,
-                    box_format="midpoint",
+                    bbox_format="yolo",
                 )
 
                 num_bboxes_after_nms = nms_bbox_pred.shape[0]
@@ -219,12 +209,13 @@ def valid_one_epoch(
                 image_grid.append(overlayed_image_true)
                 image_grid.append(overlayed_image_pred)
             grid = torchvision.utils.make_grid(image_grid)
-            # show(grid)
+
             # print(f"shape of overlayed_images: {overlayed_images.shape}")
             fig = plt.figure(figsize=(30, 30))
             plt.imshow(grid.numpy().transpose(1, 2, 0))
 
-            plt.savefig(f"{epoch}_batch0.png", dpi=300)
+            plt.savefig(f"epoch_{epoch}_batch0.png", dpi=300)
+            print("saved")
             # plt.show()
 
             # END DECODE

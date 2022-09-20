@@ -62,36 +62,57 @@ def calculate_iou(bbox1, bbox2):
         return intersect / (area1 + area2 - intersect)
 
 
-def intersection_over_union(boxes_preds, boxes_labels, box_format="midpoint"):
-    """
-    Calculates intersection over union
-    Parameters:
-        boxes_preds (tensor): Predictions of Bounding Boxes (BATCH_SIZE, 4)
-        boxes_labels (tensor): Correct labels of Bounding Boxes (BATCH_SIZE, 4)
-        box_format (str): midpoint/corners, if boxes (x,y,w,h) or (x1,y1,x2,y2)
+def intersection_over_union(
+    bbox_1: torch.Tensor, bbox_2: torch.Tensor, bbox_format: str = "yolo"
+):
+    """Calculates intersection over union between two bounding boxes.
+
+    Note:
+        The input bboxes can have any dimensions as long as the last dimension
+        is 4, where the 4 elements are the coordinates of the bounding box.
+        Therefore, in the case of YOLOv1, the input bboxes can be of shape like
+        (16, 7, 7, 4) where 16 is the batch size, 7 is the grid size, and 4 is
+        the coordinates of the bounding box.
+
+        Since the grid size is 7, it means that there are 7 x 7 = 49 pairs of bounding boxes
+        to compare.
+
+        The above will return a tensor of shape (16, 7, 7, 1) where 16 is the
+        batch size and for each batch, we have a 7 x 7 grid of IoU values for
+        each pair of bounding boxes in the grid cell. Note that the last dimension
+        1 can be "ignored" as it is an artifact of the broadcasting on the input
+        shape of (16, 7, 7, 4).
+
+    Args:
+        bbox_1 (tensor): Bounding Box 1.
+        bbox_2 (tensor): Bounding Box 2.
+        bbox_format (str): Either yolo format (x, y, w, h) or pascal_voc format (x_min, y_min, x_max, y_max).
+
     Returns:
-        tensor: Intersection over union for all examples
+        tensor: Intersection over union for all samples.
     """
 
-    if box_format == "midpoint":
-        box1_x1 = boxes_preds[..., 0:1] - boxes_preds[..., 2:3] / 2
-        box1_y1 = boxes_preds[..., 1:2] - boxes_preds[..., 3:4] / 2
-        box1_x2 = boxes_preds[..., 0:1] + boxes_preds[..., 2:3] / 2
-        box1_y2 = boxes_preds[..., 1:2] + boxes_preds[..., 3:4] / 2
-        box2_x1 = boxes_labels[..., 0:1] - boxes_labels[..., 2:3] / 2
-        box2_y1 = boxes_labels[..., 1:2] - boxes_labels[..., 3:4] / 2
-        box2_x2 = boxes_labels[..., 0:1] + boxes_labels[..., 2:3] / 2
-        box2_y2 = boxes_labels[..., 1:2] + boxes_labels[..., 3:4] / 2
+    assert bbox_format in ["yolo", "voc"]
 
-    if box_format == "corners":
-        box1_x1 = boxes_preds[..., 0:1]
-        box1_y1 = boxes_preds[..., 1:2]
-        box1_x2 = boxes_preds[..., 2:3]
-        box1_y2 = boxes_preds[..., 3:4]  # (N, 1)
-        box2_x1 = boxes_labels[..., 0:1]
-        box2_y1 = boxes_labels[..., 1:2]
-        box2_x2 = boxes_labels[..., 2:3]
-        box2_y2 = boxes_labels[..., 3:4]
+    if bbox_format == "yolo":
+        box1_x1 = bbox_1[..., 0:1] - bbox_1[..., 2:3] / 2
+        box1_y1 = bbox_1[..., 1:2] - bbox_1[..., 3:4] / 2
+        box1_x2 = bbox_1[..., 0:1] + bbox_1[..., 2:3] / 2
+        box1_y2 = bbox_1[..., 1:2] + bbox_1[..., 3:4] / 2
+        box2_x1 = bbox_2[..., 0:1] - bbox_2[..., 2:3] / 2
+        box2_y1 = bbox_2[..., 1:2] - bbox_2[..., 3:4] / 2
+        box2_x2 = bbox_2[..., 0:1] + bbox_2[..., 2:3] / 2
+        box2_y2 = bbox_2[..., 1:2] + bbox_2[..., 3:4] / 2
+
+    if bbox_format == "voc":
+        box1_x1 = bbox_1[..., 0:1]
+        box1_y1 = bbox_1[..., 1:2]
+        box1_x2 = bbox_1[..., 2:3]
+        box1_y2 = bbox_1[..., 3:4]  # (N, 1)
+        box2_x1 = bbox_2[..., 0:1]
+        box2_y1 = bbox_2[..., 1:2]
+        box2_x2 = bbox_2[..., 2:3]
+        box2_y2 = bbox_2[..., 3:4]
 
     x1 = torch.max(box1_x1, box2_x1)
     y1 = torch.max(box1_y1, box2_y1)
@@ -111,50 +132,60 @@ def non_max_suppression(
     bboxes: Union[torch.Tensor, list],
     iou_threshold: float,
     obj_threshold: float,
-    box_format: str = "midpoint",
+    bbox_format: str = "yolo",
 ):
-    """Does Non Max Suppression given bboxes
+    """Perform NMS on bounding boxes.
+
+    Shape:
+        bboxes: (N, 6) where N is the number of bounding boxes in the image
+                       and 6 is [class_id, obj_conf, 4 coordinates depending on bbox_format]
+                       and note the sequence must follow closely to the output of your
+                       decode function.
+
+
 
     Args:
         bboxes (list): list of lists containing all bboxes with each bboxes
         specified as [class_pred, prob_score, x1, y1, x2, y2]
         iou_threshold (float): threshold where predicted bboxes is correct
         obj_threshold (float): threshold to remove predicted bboxes (independent of IoU)
-        box_format (str): "midpoint" or "corners" used to specify bboxes (yolo vs pascal voc)
+        bbox_format (str): "midpoint" or "corners" used to specify bboxes (yolo vs pascal voc)
 
     Shape:
         bboxes: [S * S, 6] -> [S * S, [class_pred, prob_score, x1, y1, x2, y2]]
                 If S = 7, then [49, 6]
 
     Returns:
-        list: bboxes after performing NMS given a specific IoU threshold
+        bboxes_after_nms (torch.Tensor): bboxes after performing NMS given a specific IoU threshold
     """
 
     # bboxes: [S * S, 6] -> [S * S, [class_pred, prob_score, x1, y1, x2, y2]]
-    bboxes = [box for box in bboxes if box[1] > obj_threshold]
+    bboxes = [bbox for bbox in bboxes if bbox[1] > obj_threshold]
     bboxes = sorted(bboxes, key=lambda x: x[1], reverse=True)
     bboxes_after_nms = []
 
     while bboxes:
-        chosen_box = bboxes.pop(0)
+        chosen_bbox = bboxes.pop(0)
 
         bboxes = [
-            box
-            for box in bboxes
-            if box[0] != chosen_box[0]
+            bbox
+            for bbox in bboxes
+            if bbox[0] != chosen_bbox[0]
             or intersection_over_union(
-                torch.tensor(chosen_box[2:]),
-                torch.tensor(box[2:]),
-                box_format=box_format,
+                torch.tensor(chosen_bbox[2:]),
+                torch.tensor(bbox[2:]),
+                bbox_format=bbox_format,
             )
             < iou_threshold
         ]
 
-        bboxes_after_nms.append(chosen_box)
+        bboxes_after_nms.append(chosen_bbox)
+
     if len(bboxes_after_nms) == 0:
         bboxes_after_nms = torch.tensor([])
     else:
         bboxes_after_nms = torch.stack(bboxes_after_nms, dim=0)
+
     return bboxes_after_nms
 
 
@@ -162,7 +193,7 @@ def mean_average_precision(
     pred_boxes,
     true_boxes,
     iou_threshold=0.5,
-    box_format="midpoint",
+    bbox_format="yolo",
     num_classes=20,
 ):
     """
@@ -236,7 +267,7 @@ def mean_average_precision(
                 iou = intersection_over_union(
                     torch.tensor(detection[3:]),
                     torch.tensor(gt[3:]),
-                    box_format=box_format,
+                    bbox_format=bbox_format,
                 )
 
                 if iou > best_iou:
@@ -390,7 +421,9 @@ def voc2vocn(
     return bboxes
 
 
-def vocn2voc(bboxes: Union[np.ndarray, torch.Tensor], height: float, width: float):
+def vocn2voc(
+    bboxes: Union[np.ndarray, torch.Tensor], height: float, width: float
+):
     """Converts from normalized [x1, y1, x2, y2] to [x1, y1, x2, y2].
     Normalized coordinates are w.r.t. original image size.
     (x1, y1) is the top left corner and (x2, y2) is the bottom right corner.

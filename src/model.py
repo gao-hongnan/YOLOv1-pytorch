@@ -50,6 +50,43 @@ class CNNBlock(nn.Module):
         return self.leakyrelu(self.batchnorm(self.conv(x)))
 
 
+DEFAULT_ARCHITECTURE = [
+    (7, 64, 2, 3),
+    "M",
+    (3, 192, 1, 1),
+    "M",
+    (1, 128, 1, 0),
+    (3, 256, 1, 1),
+    (1, 256, 1, 0),
+    (3, 512, 1, 1),
+    "M",
+    [(1, 256, 1, 0), (3, 512, 1, 1), 4],
+    (1, 512, 1, 0),
+    (3, 1024, 1, 1),
+    "M",
+    [(1, 512, 1, 0), (3, 1024, 1, 1), 2],
+    (3, 1024, 1, 1),
+    (3, 1024, 2, 1),
+    (3, 1024, 1, 1),
+    (3, 1024, 1, 1),
+]
+
+
+class CNNBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, **kwargs):
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+        # https://tinyurl.com/ap22f8nf on set track_running_stats to False
+        self.batchnorm = nn.BatchNorm2d(
+            out_channels, track_running_stats=False
+        )
+        self.leakyrelu = nn.LeakyReLU(0.1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass."""
+        return self.leakyrelu(self.batchnorm(self.conv(x)))
+
+
 class Yolov1Darknet(nn.Module):
     def __init__(
         self,
@@ -60,18 +97,6 @@ class Yolov1Darknet(nn.Module):
         num_classes: int = 20,
         init_weights: bool = False,
     ):
-        """From Aladdin's repo:
-        https://github.com/aladdinpersson/Machine-Learning-Collection/blob/master/ML/Pytorch/object_detection/YOLO/dataset.py
-
-        TODO: revamp the code with better docstrings but for now it is ok.
-
-        Args:
-            in_channels (int): Incoming channels of image. Defaults to 3.
-            grid_size (int): The grid size. Defaults to 7.
-            num_bboxes_per_grid (int): The number of bbox per grid cell. Defaults to 2.
-            num_classes (int): The number of classes. Defaults to 20.
-        """
-        # S, B, C
         super().__init__()
 
         self.architecture = architecture
@@ -83,16 +108,31 @@ class Yolov1Darknet(nn.Module):
         if self.architecture is None:
             self.architecture = DEFAULT_ARCHITECTURE
 
-        self.darknet = self._create_conv_layers(self.architecture)
-        self.fcs = self._create_fcs(self.S, self.B, self.C)
+        # backbone is darknet
+        self.backbone = self._create_conv_layers(self.architecture)
+        self.head = self._create_fcs(self.S, self.B, self.C)
 
         if init_weights:
             self._initialize_weights()
 
-    def forward(self, x):
-        x = self.darknet(x)
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(
+                    m.weight, mode="fan_in", nonlinearity="leaky_relu"
+                )
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
 
-        return self.fcs(torch.flatten(x, start_dim=1))
+    def forward(self, x):
+        x = self.backbone(x)
+        return self.head(torch.flatten(x, start_dim=1))
 
     def _create_conv_layers(self, architecture):
         layers = []
@@ -162,21 +202,6 @@ class Yolov1Darknet(nn.Module):
             nn.Linear(4096, S * S * (C + B * 5)),
             # nn.Sigmoid(),  # This is not in the original implementation but added to avoid loss explosion - 增加sigmoid函数是为了将输出全部映射到(0,1)之间，因为如果出现负数或太大的数，后续计算loss会很麻烦
         )
-
-    def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(
-                    m.weight, mode="fan_in", nonlinearity="leaky_relu"
-                )
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
-                nn.init.constant_(m.bias, 0)
 
 
 if __name__ == "__main__":

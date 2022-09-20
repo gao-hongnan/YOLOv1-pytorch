@@ -161,7 +161,7 @@ class YoloLoss(nn.Module):
 
         y_preds = y_preds.reshape(-1, self.S, self.S, self.C + self.B * 5)
         assert y_preds.shape == y_trues.shape
-
+        print(y_trues[0, 1, 2, 0:5][..., 1])
         # note: in the 7x7x30 tensor, recall that there are grid cells with no bbox and hence are
         # initialized with 0s; as a result, the model will predict nonsense and possible negative values for these y_preds.
 
@@ -236,82 +236,167 @@ class YoloLoss(nn.Module):
         return total_loss
 
 
-# class YOLOv1Loss(nn.Module):
-#     def __init__(
-#         self,
-#         S: int,
-#         B: int,
-#         C: int,
-#         lambda_coord: float = 5,
-#         lambda_noobj: float = 0.5,
-#     ) -> None:
-#         super().__init__()
-#         self.S = S
-#         self.B = B
-#         self.C = C
-#         self.lambda_coord = lambda_coord
-#         self.lambda_noobj = lambda_noobj
+class YOLOv1Loss(nn.Module):
+    def __init__(
+        self,
+        S: int,
+        B: int,
+        C: int,
+        lambda_coord: float = 5,
+        lambda_noobj: float = 0.5,
+    ) -> None:
+        super().__init__()
+        self.S = S
+        self.B = B
+        self.C = C
+        self.lambda_coord = lambda_coord
+        self.lambda_noobj = lambda_noobj
+        # self.lambda_coord = 5
+        # self.lambda_noobj = 0.5
+        # bbox loss
+        self.bbox_xy_offset_loss = 0
+        self.bbox_wh_loss = 0
 
-#         # bbox loss
-#         self.bbox_xy_offset_loss = 0
-#         self.bbox_wh_loss = 0
+        # objectness loss
+        self.object_conf_loss = 0
+        self.no_object_conf_loss = 0
 
-#         # objectness loss
-#         self.object_loss = 0
-#         self.no_object_loss = 0
+        # class loss
+        self.class_loss = 0
 
-#         # class loss
-#         self.class_loss = 0
+        # mse = (y_pred - y_true)^2
+        self.mse = nn.MSELoss(reduction="sum")
 
-#     def forward(self, y_trues: torch.Tensor, y_preds: torch.Tensor):
-#         # y_trues: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
-#         # y_preds: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
-#         # however y_preds was flattened to (batch_size, S*S*(C + B * 5)) = (batch_size, 1470)
-#         # so we need to reshape it back to (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
+    def forward(self, y_preds: torch.Tensor, y_trues: torch.Tensor):
+        # y_trues: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
+        # y_preds: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
+        # however y_preds was flattened to (batch_size, S*S*(C + B * 5)) = (batch_size, 1470)
+        # so we need to reshape it back to (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
 
-#         y_preds = y_preds.reshape(-1, self.S, self.S, self.C + self.B * 5)
-#         assert y_preds.shape == y_trues.shape
+        y_trues = y_trues.reshape(-1, self.S, self.S, self.C + self.B * 5)
+        y_preds = y_preds.reshape(-1, self.S, self.S, self.C + self.B * 5)
 
-#         batch_size = y_preds.shape[0]
+        batch_size = y_preds.shape[0]
 
-#         # if dataloader has a batch size of 2, then our total loss is the average of the two losses.
-#         # i.e. total_loss = (loss1 + loss2) / 2 where loss1 is the loss for the first image in the
-#         # batch and loss2 is the loss for the second image in the batch.
+        # if dataloader has a batch size of 2, then our total loss is the average of the two losses.
+        # i.e. total_loss = (loss1 + loss2) / 2 where loss1 is the loss for the first image in the
+        # batch and loss2 is the loss for the second image in the batch.
 
-#         # to calculate total loss for each image we use the following formula:
+        # to calculate total loss for each image we use the following formula:
 
-#         for batch_index in range(batch_size):
+        for batch_index in range(batch_size):  # batchsize循环
+            # I purposely loop row as inner loop since in python
+            # y_ij = y_preds[batch_index, j, i, :]
+            for col in range(self.S):  # x方向网格循环
+                for row in range(self.S):  # y方向网格循环
+                    # this double loop is like matrix: if a matrix
+                    # M is of shape (S, S) = (7, 7) then this double loop is
+                    # M_ij where i is the row and j is the column.
+                    # so first loop is M_{11}, second loop is M_{12}...
 
-#             for row in range(self.S):
-#                 for col in range(self.S):
-#                     # this double loop is like matrix: if a matrix
-#                     # M is of shape (S, S) = (7, 7) then this double loop is
-#                     # M_ij where i is the row and j is the column.
-#                     # so first loop is M_{11}, second loop is M_{12}...
+                    # check 4 suffice cause by construction both index 4 and 9 will be filled with
+                    # the same objectness score (0 or 1)
+                    indicator_obj_ij = y_trues[batch_index, row, col, 4] == 1
+                    if indicator_obj_ij:
+                        # indicator_obj_ij means if has object then calculate else 0
+                        b = y_trues[batch_index, row, col, 0:4]
+                        bhat_1 = y_preds[batch_index, row, col, 0:4]
+                        bhat_2 = y_preds[batch_index, row, col, 5:9]
 
-#                     # check 20 suffice cause by construction both index 20 and 25 will be filled with
-#                     # the same objectness score (0 or 1)
-#                     has_object = y_trues[:, row, col, 20] == 1
-#                     if has_object:
-#                         # 1_obj means if has object then calculate else 0
+                        iou_b1 = intersection_over_union(
+                            b, bhat_1, bbox_format="yolo"
+                        )[0]
+                        iou_b2 = intersection_over_union(
+                            b, bhat_2, bbox_format="yolo"
+                        )[0]
 
-#                         y_preds_bbox1 = 1
-#                         # x_grid_offset_true = y_trues[:, row, col, ]
-#                         # x_grid_offset_pred
-#                         # grid_bbox_xy_offset_loss =
+                        x_ij, y_ij, w_ij, h_ij = b
 
-#                         #                         pred_bbox1 = torch.Tensor(
-#                         #     [preds[i, y, x, 0], preds[i, y, x, 1], preds[i, y, x, 2], preds[i, y, x, 3]])
-#                         # pred_bbox2 = torch.Tensor(
-#                         #     [preds[i, y, x, 5], preds[i, y, x, 6], preds[i, y, x, 7], preds[i, y, x, 8]])
-#                         # label_bbox = torch.Tensor(
-#                         #     [labels[i, y, x, 0], labels[i, y, x, 1], labels[i, y, x, 2], labels[i, y, x, 3]])
+                        if iou_b1 > iou_b2:
+                            xhat_ij = bhat_1[..., 0]
+                            yhat_ij = bhat_1[..., 1]
+                            what_ij = bhat_1[..., 2]
+                            hhat_ij = bhat_1[..., 3]
+                            # C_ij = max_{bhat \in {bhat_1, bhat_2}} IoU(b, bhat)
+                            C_ij = iou_b1
+                            # can be denoted Chat1_ij
+                            Chat_ij = y_preds[batch_index, row, col, 4]
+                            # iou比较小的bbox不负责预测物体，因此confidence loss算在noobj中，注意，对于标签的置信度应该是iou2
+                            C_complement_ij = iou_b2
+                            Chat_complement_ij = y_preds[
+                                batch_index, row, col, 9
+                            ]
+                        else:
+                            xhat_ij = bhat_2[..., 0]
+                            yhat_ij = bhat_2[..., 1]
+                            what_ij = bhat_2[..., 2]
+                            hhat_ij = bhat_2[..., 3]
+                            C_ij = iou_b2
 
-#         return
+                            # can be denoted Chat2_ij
+                            Chat_ij = y_preds[batch_index, row, col, 9]
+                            # iou比较小的bbox不负责预测物体，因此confidence loss算在noobj中，注意，对于标签的置信度应该是iou1
+                            C_complement_ij = iou_b1
+                            Chat_complement_ij = y_preds[
+                                batch_index, row, col, 4
+                            ]
 
-#         # y_trues shape: (1, 7, 7, 30)
-#         # y_preds shape: (1, 7, 7, 30)
-#         # where the 30 elements are
-#         # [p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20,
-#         #  x_grid, y_grid, w, h, objectness,
-#         #  x_grid, y_grid, w, h, objectness]
+                        self.bbox_xy_offset_loss = (
+                            self.bbox_xy_offset_loss
+                            + self.mse(x_ij, xhat_ij)
+                            + self.mse(y_ij, yhat_ij)
+                        )
+
+                        self.bbox_wh_loss = (
+                            self.bbox_wh_loss
+                            + self.mse(torch.sqrt(w_ij), torch.sqrt(what_ij))
+                            + self.mse(torch.sqrt(h_ij), torch.sqrt(hhat_ij))
+                        )
+
+                        self.object_conf_loss = (
+                            self.object_conf_loss + self.mse(C_ij, Chat_ij)
+                        )
+
+                        # obscure as hell no_object_conf_loss...
+
+                        self.no_object_conf_loss = (
+                            self.no_object_conf_loss
+                            + self.mse(C_complement_ij, Chat_complement_ij)
+                        )
+
+                        self.class_loss = self.class_loss + self.mse(
+                            y_trues[batch_index, row, col, 10:],
+                            y_preds[batch_index, row, col, 10:],
+                        )
+
+                        print("xy", self.bbox_xy_offset_loss)
+                        print("wh", self.bbox_wh_loss)
+                        print("objconf", self.object_conf_loss)
+                        print("noobjconf", self.no_object_conf_loss)
+                        print("classloss", self.class_loss)
+                    else:
+                        # no_object_conf is constructed to be 0 in ground truth y
+                        # can use mse but need to put torch.tensor(0) to gpu
+                        self.object_conf_loss = (
+                            self.object_conf_loss
+                            + torch.sum(
+                                (0 - y_preds[batch_index, row, col, [4, 9]])
+                                ** 2
+                            )
+                        )
+
+        total_loss = (
+            self.lambda_coord * self.bbox_xy_offset_loss
+            + self.lambda_coord * self.bbox_wh_loss
+            + self.object_conf_loss
+            + self.lambda_noobj * self.no_object_conf_loss
+            + self.class_loss
+        )
+        print(total_loss)
+        return total_loss / batch_size
+        # y_trues shape: (1, 7, 7, 30)
+        # y_preds shape: (1, 7, 7, 30)
+        # where the 30 elements are
+        # [p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20,
+        #  x_grid, y_grid, w, h, objectness,
+        #  x_grid, y_grid, w, h, objectness]

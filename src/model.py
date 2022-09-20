@@ -200,7 +200,7 @@ class Yolov1Darknet(nn.Module):
             nn.Dropout(0.0),
             nn.LeakyReLU(0.1),
             nn.Linear(4096, S * S * (C + B * 5)),
-            # nn.Sigmoid(),  # This is not in the original implementation but added to avoid loss explosion - 增加sigmoid函数是为了将输出全部映射到(0,1)之间，因为如果出现负数或太大的数，后续计算loss会很麻烦
+            nn.Sigmoid(),  # This is not in the original implementation but added to avoid loss explosion - 增加sigmoid函数是为了将输出全部映射到(0,1)之间，因为如果出现负数或太大的数，后续计算loss会很麻烦
         )
 
 

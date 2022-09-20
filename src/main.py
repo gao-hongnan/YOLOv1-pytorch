@@ -12,7 +12,7 @@ from utils import (
     intersection_over_union,
     seed_all,
 )
-from loss import YoloLoss
+from loss import YoloLoss, YOLOv1Loss
 
 DEBUG = True
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"  # "mps" # if macos m1
@@ -41,7 +41,8 @@ def main(debug: bool = True):
     optimizer = torch.optim.Adam(
         model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
-    loss_fn = YoloLoss(S, B, C)
+    # loss_fn = YoloLoss(S, B, C)
+    loss_fn = YOLOv1Loss(S, B, C)
 
     ### Load Data ###
     csv_file = "./datasets/pascal_voc_128/pascal_voc_128.csv"

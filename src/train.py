@@ -20,7 +20,7 @@ import numpy as np
 from config import config
 from torch.utils.data import DataLoader
 from model import Yolov1Darknet
-from loss import YoloLoss
+from loss import YoloLoss, YOLOv1Loss
 
 ClassMap = config.ClassMap()
 
@@ -75,7 +75,7 @@ def train_one_epoch(
         y_trues_decoded = decode(y_trues.detach().cpu())
         y_preds_decoded = decode(y_preds.detach().cpu())
 
-        loss = criterion(y_preds, y_trues)
+        loss = criterion(y_preds=y_preds, y_trues=y_trues)
 
         optimizer.zero_grad()
         loss.backward()
@@ -118,7 +118,7 @@ def valid_one_epoch(
         # y_preds: (batch_size, 7 * 7 * 30) -> (batch_size, 1470)
         y_preds = model(inputs)
 
-        loss = criterion(y_preds, y_trues)
+        loss = criterion(y_preds=y_preds, y_trues=y_trues)
         valid_loss += loss.item()
 
         # update progress bar

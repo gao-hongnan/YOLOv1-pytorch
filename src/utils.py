@@ -160,7 +160,8 @@ def non_max_suppression(
         bboxes_after_nms.append(chosen_bbox)
 
     if len(bboxes_after_nms) == 0:
-        bboxes_after_nms = torch.tensor([])
+        # hardcoded since we expect 6 values
+        bboxes_after_nms = torch.empty((0, 6))
     else:
         bboxes_after_nms = torch.stack(bboxes_after_nms, dim=0)
 

@@ -280,8 +280,9 @@ def decode(outputs: torch.Tensor, S: int = 7) -> torch.Tensor:
     # same for y_grid_offset
     # key: the logic is clearer now why he wanted to unsqueeze cell_indices to have
     # an additional dimension, this is for the broadcasting to work (add).
-    x_grid_offset = best_bbox[..., :1]
-    y_grid_offset = best_bbox[..., 1:2]
+    x_grid_offset = best_bbox[..., 0:1] #best_bbox[..., :1] changed cause of encode changed
+    y_grid_offset = best_bbox[..., 1:2] #best_bbox[..., 1:2]
+
 
     # x_center: [bs, 7, 7, 1] | y_center: [bs, 7, 7, 1]
     # logic: we recovered the x_center and y_center from the original yolo format.

@@ -1,6 +1,7 @@
 """
 Main file for training Yolo model on Pascal VOC dataset
 """
+# pylint: disable-all
 import torch
 import torchvision.transforms.functional as FT
 from tqdm import tqdm
@@ -63,29 +64,29 @@ def train_one_epoch(
     train_loss_epoch_history = []
     train_loss = 0
 
-    with autograd.detect_anomaly():
-        for batch_idx, (inputs, y_trues) in enumerate(train_bar):
-            # inputs: (batch_size, 3, 448, 448)
-            # y_trues: (batch_size, 7, 7, 30)
-            inputs, y_trues = inputs.to(device), y_trues.to(device)
 
-            # y_preds: (batch_size, 7 * 7 * 30) -> (batch_size, 1470)
-            y_preds = model(inputs)
+    for batch_idx, (inputs, y_trues) in enumerate(train_bar):
+        # inputs: (batch_size, 3, 448, 448)
+        # y_trues: (batch_size, 7, 7, 30)
+        inputs, y_trues = inputs.to(device), y_trues.to(device)
 
-            # y_trues_decoded: (batch_size, 7, 7, 6) -> (batch_size, 7 * 7, 6)
-            # [class_id, obj_conf, x, y, w, h]
-            y_trues_decoded = decode(y_trues.detach().cpu())
-            y_preds_decoded = decode(y_preds.detach().cpu())
+        # y_preds: (batch_size, 7 * 7 * 30) -> (batch_size, 1470)
+        y_preds = model(inputs)
 
-            loss = criterion(y_preds=y_preds, y_trues=y_trues)
+        # y_trues_decoded: (batch_size, 7, 7, 6) -> (batch_size, 7 * 7, 6)
+        # [class_id, obj_conf, x, y, w, h]
+        y_trues_decoded = decode(y_trues.detach().cpu())
+        y_preds_decoded = decode(y_preds.detach().cpu())
 
-            optimizer.zero_grad()
-            loss.backward(retain_graph=True)
-            optimizer.step()
-            train_loss += loss.item()
+        loss = criterion(y_preds=y_preds, y_trues=y_trues)
 
-            # update progress bar
-            train_bar.set_postfix(loss=loss.item())
+        optimizer.zero_grad()
+        loss.backward(retain_graph=False)
+        optimizer.step()
+        train_loss += loss.item()
+
+        # update progress bar
+        train_bar.set_postfix(loss=loss.item())
 
     # if want add grid of images see:  https://github.com/ivanwhaf/yolov1-pytorch/blob/b7df7740bfa9326f3d84b7c10b4ec4ee03d607c0/train.py
     # TODO: add a function to plot image grids
@@ -154,6 +155,7 @@ def valid_one_epoch(
                     obj_threshold=0.4,
                     bbox_format="yolo",
                 )
+                print(y_pred_decoded_nms.shape)
                 class_ids = y_pred_decoded_nms[:, 0]
                 num_bboxes_after_nms = y_pred_decoded_nms.shape[0]
 

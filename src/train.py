@@ -77,6 +77,8 @@ def train_one_epoch(
         # [class_id, obj_conf, x, y, w, h]
         y_trues_decoded = decode(y_trues.detach().cpu())
         y_preds_decoded = decode(y_preds.detach().cpu())
+        np.savetxt(f"batch_{batch_idx}_y_trues_decoded.txt", y_trues_decoded[0], fmt="%s")
+        np.savetxt(f"batch_{batch_idx}_y_preds_decoded.txt", y_preds_decoded[0], fmt="%s")
 
         loss = criterion(y_preds=y_preds, y_trues=y_trues)
 
@@ -134,6 +136,9 @@ def valid_one_epoch(
         # so need to convert to voc for plotting (easier)
         y_trues_decoded = decode(y_trues.detach().cpu())
         y_preds_decoded = decode(y_preds.detach().cpu())
+
+
+
 
         if batch_idx == 0:
             image_grid = []

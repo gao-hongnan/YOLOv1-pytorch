@@ -137,8 +137,13 @@ def valid_one_epoch(
         y_trues_decoded = decode(y_trues.detach().cpu())
         y_preds_decoded = decode(y_preds.detach().cpu())
 
+<<<<<<< Updated upstream
 
 
+=======
+        np.savetxt("y_preds_decoded.txt", y_preds_decoded[0].numpy(), fmt="%s")
+        np.savetxt("y_trues_decoded.txt", y_trues_decoded[0].numpy(), fmt="%s")
+>>>>>>> Stashed changes
 
         if batch_idx == 0:
             image_grid = []

@@ -72,13 +72,13 @@ def train_one_epoch(
 
         # y_preds: (batch_size, 7 * 7 * 30) -> (batch_size, 1470)
         y_preds = model(inputs)
-
+        #np.savetxt(f"batch_{batch_idx}_y_preds.txt", y_preds.detach().cpu().numpy())
         # y_trues_decoded: (batch_size, 7, 7, 6) -> (batch_size, 7 * 7, 6)
         # [class_id, obj_conf, x, y, w, h]
         y_trues_decoded = decode(y_trues.detach().cpu())
         y_preds_decoded = decode(y_preds.detach().cpu())
-        np.savetxt(f"batch_{batch_idx}_y_trues_decoded.txt", y_trues_decoded[0], fmt="%s")
-        np.savetxt(f"batch_{batch_idx}_y_preds_decoded.txt", y_preds_decoded[0], fmt="%s")
+        #np.savetxt(f"batch_{batch_idx}_y_trues_decoded.txt", y_trues_decoded[0], fmt="%s")
+        #np.savetxt(f"batch_{batch_idx}_y_preds_decoded.txt", y_preds_decoded[0], fmt="%s")
 
         loss = criterion(y_preds=y_preds, y_trues=y_trues)
 
@@ -136,14 +136,6 @@ def valid_one_epoch(
         # so need to convert to voc for plotting (easier)
         y_trues_decoded = decode(y_trues.detach().cpu())
         y_preds_decoded = decode(y_preds.detach().cpu())
-
-<<<<<<< Updated upstream
-
-
-=======
-        np.savetxt("y_preds_decoded.txt", y_preds_decoded[0].numpy(), fmt="%s")
-        np.savetxt("y_trues_decoded.txt", y_trues_decoded[0].numpy(), fmt="%s")
->>>>>>> Stashed changes
 
         if batch_idx == 0:
             image_grid = []

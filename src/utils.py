@@ -137,7 +137,7 @@ def non_max_suppression(
         bboxes_after_nms (torch.Tensor): bboxes after performing NMS given a specific IoU threshold
     """
 
-    # bboxes: [S * S, 6] -> [S * S, [class_pred, prob_score, x1, y1, x2, y2]]
+    # bboxes: [S * S, 6] -> [S * S, [class_id, conf, x1, y1, x2, y2]]
     bboxes = [bbox for bbox in bboxes if bbox[1] > obj_threshold]
     bboxes = sorted(bboxes, key=lambda x: x[1], reverse=True)
     bboxes_after_nms = []

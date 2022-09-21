@@ -88,8 +88,8 @@ class YoloLoss(nn.Module):
         """Corresponds to row 3 in the paper."""
         # pred_box is the confidence score for the bbox with highest IoU
         pred_box = (
-            better_bbox_index * y_preds[..., 4:5]
-            + (1 - better_bbox_index) * y_preds[..., 9:10]
+            better_bbox_index * y_preds[..., 9:10]
+            + (1 - better_bbox_index) * y_preds[..., 4:5]
         )
 
         object_loss = self.mse(

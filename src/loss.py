@@ -230,7 +230,7 @@ class YoloLoss(nn.Module):
             + self.lambda_noobj * no_object_loss  # forth row
             + class_loss  # fifth row
         )
-        print(f"total_loss: {total_loss}")
+        # print(f"total_loss: {total_loss}")
         return total_loss
 
 

@@ -1,7 +1,6 @@
 """
 Main file for training Yolo model on Pascal VOC dataset
 """
-# pylint: disable-all
 import torch
 import torchvision.transforms.functional as FT
 from tqdm import tqdm

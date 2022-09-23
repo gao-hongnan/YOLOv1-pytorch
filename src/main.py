@@ -1,4 +1,3 @@
-# pylint: disable-all
 import torch
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as FT
@@ -20,7 +19,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"  # "mps" # if macos m1
 print(f"Using {DEVICE}")
 
 # Hyperparameters etc.
-LEARNING_RATE = 2e-5#5e-5 # 2e-5
+LEARNING_RATE = 2e-5  # 5e-5 # 2e-5
 WEIGHT_DECAY = 0
 NUM_WORKERS = 0
 seed_all(seed=1992)
@@ -29,7 +28,7 @@ seed_all(seed=1992)
 def main(debug: bool = True):
     if debug:
         BATCH_SIZE = 4
-        EPOCHS = 50
+        EPOCHS = 10
     else:
         BATCH_SIZE = 4
         EPOCHS = 100
@@ -42,8 +41,8 @@ def main(debug: bool = True):
     optimizer = torch.optim.Adam(
         model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
-    loss_fn = YoloLoss(S, B, C)
-    #loss_fn = YOLOv1Loss(S, B, C)
+    # loss_fn = YoloLoss(S, B, C)
+    loss_fn = YOLOv1Loss(S, B, C)
 
     ### Load Data ###
     csv_file = "./datasets/pascal_voc_128/pascal_voc_128.csv"

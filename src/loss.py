@@ -406,6 +406,8 @@ class YOLOv1Loss(nn.Module):
 
 # reshape to [49, 30] from [7, 7, 30]
 class YOLOv1Loss2D(nn.Module):
+    # assumptions
+    # 1. B = 2 is a must since we have iou_1 vs iou_2
     def __init__(
         self,
         S: int,
@@ -440,13 +442,11 @@ class YOLOv1Loss2D(nn.Module):
         self.class_loss = 0
 
     def forward(self, y_preds: torch.Tensor, y_trues: torch.Tensor):
-        # y_trues: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
-        # y_preds: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
-        # however y_preds was flattened to (batch_size, S*S*(C + B * 5)) = (batch_size, 1470)
-        # so we need to reshape it back to (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
-
         self._initiate_loss()
 
+        # y_trues: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
+        # y_preds: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
+        # reshape all to (batch_size, 49, 30) for easier computation
         # shape: (batch_size, 7*7, 30) = (batch_size, 49, 30)
         y_trues = y_trues.reshape(-1, self.S * self.S, self.C + self.B * 5)
         y_preds = y_preds.reshape(-1, self.S * self.S, self.C + self.B * 5)
@@ -456,11 +456,8 @@ class YOLOv1Loss2D(nn.Module):
         # if dataloader has a batch size of 2, then our total loss is the average of the two losses.
         # i.e. total_loss = (loss1 + loss2) / 2 where loss1 is the loss for the first image in the
         # batch and loss2 is the loss for the second image in the batch.
-
-        # to calculate total loss for each image we use the following formula:
-
-        # batch_index is the index of the image in the batch
-        for batch_index in range(batch_size):  # batchsize循环
+        for batch_index in range(batch_size):  # batch_index is the index of the image in the batch
+            
             # subset here to stay consistent with my notes instead of doing it
             # more obscurely as y_trues[batch_index, grid_cell_index, ...] later
             # now y_true and y_pred refers to 1 single image **important to know**
@@ -469,18 +466,12 @@ class YOLOv1Loss2D(nn.Module):
 
             # grid_cell_index ranges from 0 to 48 and goes from top left to bottom right
             for grid_cell_index in range(self.S * self.S):
-                # this double loop is like matrix: if a matrix
-                # M is of shape (S, S) = (7, 7) then this double loop is
-                # M_ij where i is the row and j is the column.
-                # so first loop is M_{11}, second loop is M_{12}...
-
-                # FIXME: consider adding a loop over 2 bbox to stay consistent with my notes
                 # check 4 suffice cause by construction both index 4 and 9 will be filled with
-                # the same objectness score (0 or 1)
-                indicator_obj_ij = y_true[grid_cell_index, 4] == 1
+                # indicator_obj_i corresponds to 1_i^obj and not 1_ib^obj, this means if has object then calculate else 0 
+                indicator_obj_i = y_true[grid_cell_index, 4] == 1
 
-                if indicator_obj_ij:
-                    # indicator_obj_ij means if has object then calculate else 0
+                if indicator_obj_i:
+                    
                     b = y_true[grid_cell_index, 0:4]
                     bhat_1 = y_pred[grid_cell_index, 0:4]
                     bhat_2 = y_pred[grid_cell_index, 5:9]
@@ -488,37 +479,37 @@ class YOLOv1Loss2D(nn.Module):
                     iou_b1 = intersection_over_union(b, bhat_1, bbox_format="yolo")[0]
                     iou_b2 = intersection_over_union(b, bhat_2, bbox_format="yolo")[0]
 
-                    x_ij, y_ij, w_ij, h_ij = b
+                    x_i, y_i, w_i, h_i = b
 
                     if iou_b1 > iou_b2:
-                        xhat_ij = bhat_1[..., 0]
-                        yhat_ij = bhat_1[..., 1]
-                        what_ij = bhat_1[..., 2]
-                        hhat_ij = bhat_1[..., 3]
-                        # C_ij = max_{bhat \in {bhat_1, bhat_2}} IoU(b, bhat)
-                        C_ij = y_true[grid_cell_index, 4]  # iou_b1
-                        # can be denoted Chat1_ij
-                        Chat_ij = y_pred[grid_cell_index, 4]
+                        xhat_i = bhat_1[..., 0]
+                        yhat_i = bhat_1[..., 1]
+                        what_i = bhat_1[..., 2]
+                        hhat_i = bhat_1[..., 3]
+                        # C_i = max_{bhat \in {bhat_1, bhat_2}} IoU(b, bhat)
+                        C_i = y_true[grid_cell_index, 4]  # iou_b1
+                        # can be denoted Chat1_i
+                        Chat_i = y_pred[grid_cell_index, 4]
                         # iou比较小的bbox不负责预测物体，因此confidence loss算在noobj中，注意，对于标签的置信度应该是iou2
-                        C_complement_ij = iou_b2
-                        Chat_complement_ij = y_pred[grid_cell_index, 9]
+                        C_complement_i = iou_b2
+                        Chat_complement_i = y_pred[grid_cell_index, 9]
                     else:
-                        xhat_ij = bhat_2[..., 0]
-                        yhat_ij = bhat_2[..., 1]
-                        what_ij = bhat_2[..., 2]
-                        hhat_ij = bhat_2[..., 3]
-                        C_ij = y_true[grid_cell_index, 9]  # iou_b2
+                        xhat_i = bhat_2[..., 0]
+                        yhat_i = bhat_2[..., 1]
+                        what_i = bhat_2[..., 2]
+                        hhat_i = bhat_2[..., 3]
+                        C_i = y_true[grid_cell_index, 9]  # iou_b2
 
-                        # can be denoted Chat2_ij
-                        Chat_ij = y_pred[grid_cell_index, 9]
+                        # can be denoted Chat2_i
+                        Chat_i = y_pred[grid_cell_index, 9]
                         # iou比较小的bbox不负责预测物体，因此confidence loss算在noobj中，注意，对于标签的置信度应该是iou1
-                        C_complement_ij = iou_b1
-                        Chat_complement_ij = y_pred[grid_cell_index, 4]
+                        C_complement_i = iou_b1
+                        Chat_complement_i = y_pred[grid_cell_index, 4]
 
                     self.bbox_xy_offset_loss = (
                         self.bbox_xy_offset_loss
-                        + self.mse(x_ij, xhat_ij)
-                        + self.mse(y_ij, yhat_ij)
+                        + self.mse(x_i, xhat_i)
+                        + self.mse(y_i, yhat_i)
                     )
 
                     # make them abs as sometimes the preds can be negative if no sigmoid layer.
@@ -526,17 +517,17 @@ class YOLOv1Loss2D(nn.Module):
                     self.bbox_wh_loss = (
                         self.bbox_wh_loss
                         + self.mse(
-                            torch.sqrt(w_ij),
-                            torch.sqrt(torch.abs(what_ij + 1e-6)),
+                            torch.sqrt(w_i),
+                            torch.sqrt(torch.abs(what_i + 1e-6)),
                         )
                         + self.mse(
-                            torch.sqrt(h_ij),
-                            torch.sqrt(torch.abs(hhat_ij + 1e-6)),
+                            torch.sqrt(h_i),
+                            torch.sqrt(torch.abs(hhat_i + 1e-6)),
                         )
                     )
 
                     self.object_conf_loss = self.object_conf_loss + self.mse(
-                        C_ij, Chat_ij
+                        C_i, Chat_i
                     )
 
                     # obscure as hell no_object_conf_loss...
@@ -547,7 +538,7 @@ class YOLOv1Loss2D(nn.Module):
                     # )
                     # FIXME: by right this is not the same as paper but gives better initial results
                     self.no_object_conf_loss = self.no_object_conf_loss + torch.sum(
-                        (0 - Chat_complement_ij) ** 2
+                        (0 - Chat_complement_i) ** 2
                     )
 
                     self.class_loss = self.class_loss + self.mse(

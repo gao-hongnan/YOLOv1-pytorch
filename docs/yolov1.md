@@ -44,6 +44,10 @@ $$
 \newcommand{\phat}{\symbf{\hat{p}}}
 \newcommand{\y}{\symbf{y}}
 \newcommand{\L}{\mathcal{L}}
+\newcommand{\lsq}{\left[}
+\newcommand{\rsq}{\right]}
+\newcommand{\lpar}{\left(}
+\newcommand{\rpar}{\right)}
 $$
 
 # YOLOv1
@@ -183,7 +187,26 @@ $$
 For more details, have a read at [this article](https://www.harrysprojects.com/articles/fastrcnn.html)
 to understand the parametrization.
 
+### Loss Function
+
+See below section.
+
 ### Other Important Notations
+
+````{prf:definition} S, B and C
+:label: s-b-c
+
+
+- $S$: We divide an image into an $S \times S$ grid, so $S$ is the **grid size**;
+- $\gx$ denotes $x$-coordinate grid cell and $\gy$ denotes the $y$-coordinate grid cell and so the first grid cell can be denoted $(\gx, \gy) = (0, 0)$ or $(1, 1)$ if using python;
+- $B$: In each grid cell $(\gx, \gy)$, we can predict $B$ number of bounding boxes;
+- $C$: This is the number of classes;
+- Let $\cc \in \{1, 2, \ldots, 20\}$ be a **scalar**, which is the class index (id) where
+    - 20 is the number of classes;
+    - in Pascal VOC: `[aeroplane, bicycle, bird, boat, bottle, bus, car, cat, chair, cow, diningtable, dog, horse, motorbike, person, pottedplant, sheep, sofa, train, tvmonitor]`
+    - So if the object is class bicycle, then $\cc = 2$;
+    - Note in python notation, $\cc$ starts from $0$ and ends at $19$ so need to shift accordingly.
+````
 
 ````{prf:definition} Probability Object
 :label: prob-object
@@ -263,8 +286,9 @@ name: label-matrix
 The output tensor from YOLOv1's last layer.
 ```
 
-In our implementation, there is some small changes such as adding batch norm layers, the overall 
-architecture remains similar to what was proposed in the paper.
+In our implementation, there are some small changes such as adding 
+[**batch norm**](https://pytorch.org/docs/stable/generated/torch.nn.BatchNorm2d.html) layers.
+However, the overall architecture remains similar to what was proposed in the paper.
 
 The model architecture in code is defined below:
 
@@ -508,6 +532,19 @@ print(f"y_preds.shape: {y_preds.shape}")
 Notice how the input label `y_trues` and `y_preds` are of shape `(batch_size, S, S, B * 5 + C)`, 
 in our case is `(16, 7, 7, 30)`. We will talk more in section [head](yolov1.md#head) below.
 
+(yolov1.md#model-summary)=
+### Model Summary
+
+We use `torchinfo` package to print out the model summary.
+
+```{code-cell} ipython3
+:tags: [hide-output]
+
+torchinfo.summary(
+    yolov1, input_size=(batch_size, in_channels, image_size, image_size)
+)
+```
+
 ### Backbone
 
 We use Darknet as our backbone. The backbone serves as a feature extractor.
@@ -516,21 +553,21 @@ This means that we can replace the backbone with any other feature extractor.
 For example, we can replace the Darknet backbone with ResNet50, which is a 50-layer Convoluational
 Neural Network. You only need to make sure that the output of the backbone can match the shape
 of the input of the YOLO head. We often overcome the shape mismatch issue with
-a [**Global Average Pooling**](https://pytorch.org/docs/stable/generated/torch.nn.AdaptiveAvgPool2d.html).
+[**Global Average Pooling**](https://pytorch.org/docs/stable/generated/torch.nn.AdaptiveAvgPool2d.html).
 
 (yolov1.md#head)=
 ### Head
 
-We printed out the last layer of the YOLOv1 model:
+We print out the last layer of the YOLOv1 model:
 
 ```{code-cell} ipython3
 :tags: [hide-output]
 
 print(f"yolov1 last layer: {yolov1.head[-1]}")
-torchinfo.summary(
-    yolov1, input_size=(batch_size, in_channels, image_size, image_size)
-)
 ```
+
+Unfortunately, the info is not very helpful. We will refer back to the model summary
+in section [model summary](yolov1.md#model-summary) to understand the output shape of the last layer.
 
 Notice that the last layer is actually a linear (fc) layer with shape `[16, 1470]`. This is in
 contrast of the output shape of `y_preds` which is `[16, 7, 7, 30]`. This is because in the
@@ -540,13 +577,41 @@ The reason of the reshape is because of better interpretation.
 More concretely, the paper said that the core idea is to divide the input image into an $S \times S$
 grid, where each grid cell has a shape of $5B + C$. See {numref}`label-matrix` for a visual example.
 
+````{admonition} 2D matrix  vs 3D tensor
+If we remove the batch size dimension, then the output tensor of `y_trues` and `y_preds` will be
+a 3D tensor of shape `(S, S, B * 5 + C) = (7, 7, 30)`. 
+
+We can also think of it as a 2D matrix, where we flatten the first and second dimension, essentially
+collapsing the $7 \times 7$ grid into a single dimension of $49$. The reason why I did this is for
+easier interpretation, as a 2D matrix is easier to visualize than a 3D tensor.
+
+We will carry this idea forward in the next section.
+````
+
+## From 3D Tensor to 2D Matrix
+
+We will now discuss how to convert the 3D tensor output of the YOLOv1 model to a 2D matrix.
+
+
+```{figure} https://storage.googleapis.com/reighns/images/2d_3d.PNG
+---
+name: 2dto3d
+---
+Convert 3D tensor to 2D matrix
+```
+
 ## Construction of Ground Truth Matrix
 
 Denote the subscript $i$ in the following convention to mean the $i$-th grid cell where
-$i \in \{1, 2, \ldots 49\}$ as seen in diagram **TODO: insert diagram**.
+$i \in \{1, 2, \ldots 49\}$ as seen in figure {numref}`2dto3d`.
 
-We will assume $S=7$, $B=2$, and $C=20$. Consequently, each row of the ground truth matrix
-will have $2B + C = 30$ elements.
+We will assume $S=7$, $B=2$, and $C=20$, where
+
+- $S$ is the grid size;
+- $B$ is the number of bounding boxes to be predicted;
+- $C$ is the number of classes.
+
+Consequently, each row of the ground truth matrix will have $2B + C = 30$ elements.
 
 ````{prf:definition} YOLOv1 Ground Truth Matrix
 :label: yolo_gt_matrix
@@ -566,18 +631,20 @@ where
 - $\b_i = \begin{bmatrix}\xx_i & \yy_i & \ww_i & \hh_i \end{bmatrix} \in \R^{1 \times 4}$
   as per {prf:ref}`param-bbox`;
 
-- $\conf_i = \Pobj_i \cdot \iou \in \R$ as per {prf:ref}`gt-confidence`, we will keep this off the
-  tables for now and set $\conf_i$ to be equals to $\Pobj_i$ such that $\conf = 1$ if $\Pobj_i = 1$ and 
-  $0$ if $\Pobj_i = 0$.
-    - The reason is non-trivial because we have no way of knowing the IOU of the ground truth bounding
-      box with the predicted bounding box before training. You can think of it as a proxy for the
-      calculation later during the loss function construction.
+- $\conf_i = \Pobj_i \cdot \iou \in \R$ as per {prf:ref}`gt-confidence`, note very carefully
+  how $\conf_i$ is defined if the grid cell has an object, and how it is $0$ if there are no objects in
+  that grid cell $i$.
+  - We will keep the formal definition off the tables for now and set $\conf_i$ to be equals to $\Pobj_i$
+    such that $\conf = 1$ if $\Pobj_i = 1$ and $0$ if $\Pobj_i = 0$.
+  - The reason is non-trivial because we have no way of knowing the IOU of the ground truth bounding
+    box with the predicted bounding box before training. You can think of it as a proxy for the
+    calculation later during the loss function construction.
 
 - $\p_i = \begin{bmatrix}0 & 0 & 1 & \cdots &0\end{bmatrix} \in \R^{1 \times 20}$ where we use the
   class id $\cc$ to construct our class probability ground truth vector such that $\p$ is everywhere 
   $0$ encoded except at the $\cc$-th index (one hot encoding). In the paper, $\p_i$ is defined as 
   $\P(\text{Class}_i \mid \text{Obj})$ which means that $\p_i$ is conditioned on the grid cell given
-  there exists an object, which means for grid cells $i$ without any objects, then $\p_i$ is all zeros.
+  there exists an object, which means for grid cells $i$ without any objects, $\p_i$ is a zero vector.
 
 Then the ground truth matrix $\y$ is constructed as follows:
 
@@ -596,6 +663,7 @@ Note that this is often reshaped to be $\y \in \R^{7 \times 7 \times 30}$ in man
 ````{prf:remark} Remark: Ground Truth Matrix Construction
 :label: yolo_gt_matrix_remark
 
+**TODO insert encode here to show why the 1st 5 and next 5 elements are the same**
 
 It is also worth noting to everyone that we set the first 5 elements and the next 5 elements the same,
 therefore, we don't make a conscious effort to differentiate between $\b_i$,
@@ -616,12 +684,12 @@ Lastly, the idea of having 2 bounding boxes in the encoding construction will be
 
 ## Construction of Prediction Matrix
 
-The construction of the prediction matrix $\hat{\y}$ is constructed as the last layer of the neural network,
+The construction of the prediction matrix $\hat{\y}$ follows the last layer of the neural network,
 shown earlier in diagram {ref}`yolov1-model`.
 
 To stay consistent with the shape defined in {prf:ref}`yolo_gt_matrix`, we will reshape
-the last layer from $7 \times 7 \times 30$ to $49 \times 30$. In fact, the last layer is 
-not really a 3d-tensor by design, it was in fact a linear/dense layer of shape $[-1, 1470]$.
+the last layer from $7 \times 7 \times 30$ to $49 \times 30$. As mentioned in [head section](yolov1.md#head)
+the last layer is not really a 3d-tensor by design, it was in fact a linear/dense layer of shape $[-1, 1470]$.
 The $1470$ neurons were reshaped to be $7 \times 7 \times 30$ so that readers like us can
 interpret it better with the injection of grid cell idea.
 
@@ -630,7 +698,7 @@ interpret it better with the injection of grid cell idea.
 :label: yolo_pred_matrix
 
 Define $\hat{\y}_i \in \R^{1 \times 30}$ to be the $i$-th row of the prediction matrix
-$\hat{\y} \in \R^{49 \times 30}$.
+$\hat{\y} \in \R^{49 \times 30}$, output from the last layer of the neural network.
 
 $$
 \yhat_i
@@ -644,9 +712,14 @@ where
 - $\bhat_i^1 = \begin{bmatrix}\xxhat_i^1 & \yyhat_i^1 & \wwhat_i^1 & \hhhat_i^1 \end{bmatrix} 
   \in \R^{1 \times 4}$ is the predictions of the 4 coordinates made by bounding box 1;
 - $\bhat_i^2$ is then the predictions of the 4 coordinates made by bounding box 2;
-- $\confhat_i^1 \in \R$ is the object/bounding box confidence scalar of the first bounding box made by the model. As a reminder, this value will be compared during loss function with the $\conf$ constructed in the ground truth;
-- $\confhat_i^2 \in \R$ is the object/bounding box confidence scalar of the second bounding box made by the model;
-- $\phat_i \in \R^{1 \times 20}$ where the model predicts a class probability vector indicating which class is the most likely. By construction of loss function, this probability vector does not sum to 1 since the author uses MSELoss to penalize, this is slightly counter intuitive as cross-entropy loss does a better job at forcing classification loss - this is remedied in later yolo versions!
+- $\confhat_i^1 \in \R$ is the object/bounding box confidence score (a scalar) of the first bounding
+  box made by the model. As a reminder, this value will be compared during loss function with the 
+  $\conf$ constructed in the ground truth;
+- $\confhat_i^2 \in \R$ is the object/bounding box confidence score of the second bounding box made by the model;
+- $\phat_i \in \R^{1 \times 20}$ where the model predicts a class probability vector indicating 
+  which class is the most likely. By construction of loss function, this probability vector does not
+  sum to 1 since the author uses MSELoss to penalize, this is slightly counter intuitive as 
+  cross-entropy loss does a better job at forcing classification loss - this is remedied in later yolo versions!
     - Notice that there is no superscript for $\phat_i$, that is because the model only predicts one set of class probabilities for each grid cell $i$, even though you can predict $B$ number of bounding boxes.
 
 
@@ -663,11 +736,33 @@ $$
 $$
 
 and of course they must be the same shape as $\y$.
-
-**REMINDER**
-
-In implementation, most repo/authors treat both $\y$ and $\yhat$ as $\R^{7 \times 7 \times 30}$, but that is because slicing 3d-tensors in tensor space is easier in code but for reading, I restrict it to a 2d-matrix where possible.
 ````
 
+````{admonition} Some Remarks
+:class: warning
 
-, it will shift and stretch the prior box in two different ways, possibly to cover two different objects (but both are constrained to have the same class). You might wonder why it's trying to do two boxes. The answer is probably because 49 boxes isn't enough, especially when there are lots of objects close together, although what tends to happen during training is that the predicted boxes become specialised. So one box might learn to find big things, the other might learn to find small things, this may help the network generalise to other domains
+1. Note that in our `head` layer, we did not choose to add `nn.Sigmoid()` after the last layer. This
+   will cause the output of the last layer to be in the range of $[-\infty, \infty]$, which means
+   it is unbounded. Therefore, non-negative values like the width and height `what_i` and `hhat_i`
+   can be negative!
+
+2. Each grid cell predicts two bound boxes, it will shift and stretch the prior box in two different ways, 
+   possibly to cover two different objects (but both are constrained to have the same class). 
+   You might wonder why it's trying to do two boxes. The answer is probably because 49 boxes isn't
+   enough, especially when there are lots of objects close together, although what tends to happen 
+   during training is that the predicted boxes become specialised. So one box might learn to find
+   big things, the other might learn to find small things, this may help the network
+   generalise to other domains[^1].
+````
+
+## Loss Function
+
+Possibly the most important part of the YOLOv1 paper is the loss function, it is also
+the most confusing if you are not familiar with the notation. 
+
+### Bipartite Matching
+
+pass
+
+
+[^1]: https://www.harrysprojects.com/articles/yolov1.html

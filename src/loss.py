@@ -540,9 +540,10 @@ class YOLOv1Loss2D(nn.Module):
                     #     + self.mse(C_complement_ij, Chat_complement_ij)
                     # )
                     # FIXME: by right this is not the same as paper but gives better initial results
-                    self.no_object_conf_loss = self.no_object_conf_loss + torch.sum(
-                        (0 - Chat_complement_i) ** 2
-                    )
+                    # FIXME: REMOVED on 25 september 2022 cause I think no need.
+                    # self.no_object_conf_loss = self.no_object_conf_loss + torch.sum(
+                    #     (0 - Chat_complement_i) ** 2
+                    # )
 
                     self.class_loss = self.class_loss + self.mse(
                         y_true[grid_cell_index, 10:],

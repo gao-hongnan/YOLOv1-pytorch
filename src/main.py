@@ -13,6 +13,7 @@ from utils import (
     seed_all,
 )
 from loss import YoloLoss, YOLOv1Loss, YOLOv1Loss2D
+from config import config
 
 DEBUG = True
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"  # "mps" # if macos m1
@@ -23,6 +24,8 @@ LEARNING_RATE = 2e-5  # 5e-5 # 2e-5
 WEIGHT_DECAY = 0
 NUM_WORKERS = 0
 seed_all(seed=1992)
+
+ModelConfig = config.ModelConfig()
 
 
 def main(debug: bool = True):
@@ -35,7 +38,7 @@ def main(debug: bool = True):
 
     S, B, C = 7, 2, 20
     model = Yolov1Darknet(
-        in_channels=3, grid_size=7, num_bboxes_per_grid=2, num_classes=20
+        architecture=ModelConfig.architecture, in_channels=3, S=7, B=2, C=20
     ).to(DEVICE)
 
     optimizer = torch.optim.Adam(
@@ -84,9 +87,7 @@ def main(debug: bool = True):
         subset_indices[3] = 18
         subset_indices = subset_indices.tolist()
 
-        voc_dataset_debug = torch.utils.data.Subset(
-            voc_dataset_train, subset_indices
-        )
+        voc_dataset_debug = torch.utils.data.Subset(voc_dataset_train, subset_indices)
         voc_dataloader_debug = DataLoader(
             dataset=voc_dataset_debug,
             batch_size=BATCH_SIZE,

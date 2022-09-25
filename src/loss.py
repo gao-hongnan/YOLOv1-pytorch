@@ -1,6 +1,7 @@
 """
 Implementation of Yolo Loss Function from the original yolo paper
 """
+from msvcrt import kbhit
 import torch
 from torch import nn
 from utils import intersection_over_union
@@ -456,8 +457,10 @@ class YOLOv1Loss2D(nn.Module):
         # if dataloader has a batch size of 2, then our total loss is the average of the two losses.
         # i.e. total_loss = (loss1 + loss2) / 2 where loss1 is the loss for the first image in the
         # batch and loss2 is the loss for the second image in the batch.
-        for batch_index in range(batch_size):  # batch_index is the index of the image in the batch
-            
+        for batch_index in range(
+            batch_size
+        ):  # batch_index is the index of the image in the batch
+
             # subset here to stay consistent with my notes instead of doing it
             # more obscurely as y_trues[batch_index, grid_cell_index, ...] later
             # now y_true and y_pred refers to 1 single image **important to know**
@@ -467,11 +470,11 @@ class YOLOv1Loss2D(nn.Module):
             # grid_cell_index ranges from 0 to 48 and goes from top left to bottom right
             for grid_cell_index in range(self.S * self.S):
                 # check 4 suffice cause by construction both index 4 and 9 will be filled with
-                # indicator_obj_i corresponds to 1_i^obj and not 1_ib^obj, this means if has object then calculate else 0 
+                # indicator_obj_i corresponds to 1_i^obj and not 1_ib^obj, this means if has object then calculate else 0
                 indicator_obj_i = y_true[grid_cell_index, 4] == 1
 
                 if indicator_obj_i:
-                    
+
                     b = y_true[grid_cell_index, 0:4]
                     bhat_1 = y_pred[grid_cell_index, 0:4]
                     bhat_2 = y_pred[grid_cell_index, 5:9]
@@ -565,3 +568,137 @@ class YOLOv1Loss2D(nn.Module):
         # print(f"total_loss_averaged_over_batch {total_loss_averaged_over_batch}")
 
         return total_loss_averaged_over_batch
+
+
+# reshape to [49, 30] from [7, 7, 30]
+# incorporate bbox index in the B=2 dimension
+class YOLOv1Loss2Dv2(nn.Module):
+    # assumptions
+    # 1. B = 2 is a must since we have iou_1 vs iou_2
+    def __init__(
+        self,
+        S: int,
+        B: int,
+        C: int,
+        lambda_coord: float = 5,
+        lambda_noobj: float = 0.5,
+    ) -> None:
+        super().__init__()
+        self.S = S
+        self.B = B
+        self.C = C
+        self.lambda_coord = lambda_coord
+        self.lambda_noobj = lambda_noobj
+
+        # mse = (y_pred - y_true)^2
+        # FIXME: still unclean cause by right reduction is not sum since we are
+        # adding scalars, but class_loss uses vector sum reduction so need to use for all?
+        self.mse = nn.MSELoss(reduction="sum")
+
+    # important step if not the curr batch loss will be added to the next batch loss which causes error.
+    def _initiate_loss(self) -> None:
+        # bbox loss
+        self.bbox_xy_offset_loss = 0
+        self.bbox_wh_loss = 0
+
+        # objectness loss
+        self.object_conf_loss = 0
+        self.no_object_conf_loss = 0
+
+        # class loss
+        self.class_loss = 0
+
+    def forward(self, y_preds: torch.Tensor, y_trues: torch.Tensor):
+        self._initiate_loss()
+
+        # y_trues: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
+        # y_preds: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
+        # reshape all to (batch_size, 49, 30) for easier computation
+        # shape: (batch_size, 7*7, 30) = (batch_size, 49, 30)
+        y_trues = y_trues.reshape(-1, self.S * self.S, self.C + self.B * 5)
+        y_preds = y_preds.reshape(-1, self.S * self.S, self.C + self.B * 5)
+
+        batch_size = y_preds.shape[0]
+
+        # if dataloader has a batch size of 2, then our total loss is the average of the two losses.
+        # i.e. total_loss = (loss1 + loss2) / 2 where loss1 is the loss for the first image in the
+        # batch and loss2 is the loss for the second image in the batch.
+        for batch_index in range(
+            batch_size
+        ):  # batch_index is the index of the image in the batch
+
+            # subset here to stay consistent with my notes instead of doing it
+            # more obscurely as y_trues[batch_index, grid_cell_index, ...] later
+            # now y_true and y_pred refers to 1 single image **important to know**
+            y_true = y_trues[batch_index]  # (49, 30)
+            y_pred = y_preds[batch_index]  # (49, 30)
+
+            # grid_cell_index ranges from 0 to 48 and goes from top left to bottom right
+            for i in range(self.S * self.S):  # i = grid_cell_index
+                b = y_true[i, 0:4]  # b_true
+                iou_bhat_j_max = iou_bhat_j
+                j_max = j
+
+                for j in range(self.B):  # j = bbox_index
+                    # j=0 -> 0:4, j=1 -> 5:9...
+                    bhat_j = y_pred[i, j * 5 : j * 5 + 4]
+                    iou_bhat_j = intersection_over_union(b, bhat_j, bbox_format="yolo")[
+                        0
+                    ]
+
+                    # find the bbox with the highest iou
+                    if iou_bhat_j > iou_bhat_j_max:
+                        iou_bhat_j_max = iou_bhat_j
+                        j_max = j
+
+                # now we have the bbox with the highest iou
+                for j in range(self.B):
+                    # j=0 -> 0:4, j=1 -> 5:9...
+                    bhat_j = y_pred[i, j * 5 : j * 5 + 4]
+
+                    x_ij, y_ij, w_ij, h_ij = b
+                    xhat_ij, yhat_ij, what_ij, hhat_ij = (
+                        bhat_j[..., 0],
+                        bhat_j[..., 1],
+                        bhat_j[..., 2],
+                        bhat_j[..., 3],
+                    )
+
+                    conf_ij = y_true[i, 4]
+                    confhat_ij = bhat_j[..., 4]
+
+                    if j == j_max:  # this is checking our 1_ij^obj
+                        # then compute
+                        # 1. x and y offset loss
+                        self.bbox_xy_offset_loss = (
+                            self.bbox_xy_offset_loss
+                            + self.mse(x_ij, xhat_ij)
+                            + self.mse(y_ij, yhat_ij)
+                        )
+
+                        # 2. width and height loss
+                        self.bbox_wh_loss = (
+                            self.bbox_wh_loss
+                            + self.mse(
+                                torch.sqrt(w_ij),
+                                torch.sqrt(torch.abs(what_ij + 1e-6)),
+                            )
+                            + self.mse(
+                                torch.sqrt(h_ij),
+                                torch.sqrt(torch.abs(hhat_ij + 1e-6)),
+                            )
+                        )
+
+                        # 3. objectness loss
+                        self.object_conf_loss = self.object_conf_loss + self.mse(
+                            conf_ij, confhat_ij
+                        )
+
+                        # 4. no objectness loss
+                        self.no_object_conf_loss = self.no_object_conf_loss + torch.sum(
+                            (0 - confhat_ij) ** 2
+                        )
+
+                    else:
+                        # purposely put pass to indicate they all are zero
+                        pass

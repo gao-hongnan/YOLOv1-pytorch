@@ -136,15 +136,11 @@ class VOCDataset(torch.utils.data.Dataset):
             image (torch.Tensor): Image tensor of shape (3, image_size, image_size).
             bboxes (torch.Tensor): Bounding boxes tensor of shape (S, S, 5 * B + C).
         """
-        image_path = os.path.join(
-            self.images_dir, self.df.loc[index, "image_id"]
-        )
+        image_path = os.path.join(self.images_dir, self.df.loc[index, "image_id"])
 
         image = Image.open(image_path).convert("RGB")
 
-        label_path = os.path.join(
-            self.labels_dir, self.df.loc[index, "label_id"]
-        )
+        label_path = os.path.join(self.labels_dir, self.df.loc[index, "label_id"])
 
         bboxes = self.strip_label_path(label_path)
 
@@ -280,9 +276,10 @@ def decode(outputs: torch.Tensor, S: int = 7) -> torch.Tensor:
     # same for y_grid_offset
     # key: the logic is clearer now why he wanted to unsqueeze cell_indices to have
     # an additional dimension, this is for the broadcasting to work (add).
-    x_grid_offset = best_bbox[..., 0:1] #best_bbox[..., :1] changed cause of encode changed
-    y_grid_offset = best_bbox[..., 1:2] #best_bbox[..., 1:2]
-
+    x_grid_offset = best_bbox[
+        ..., 0:1
+    ]  # best_bbox[..., :1] changed cause of encode changed
+    y_grid_offset = best_bbox[..., 1:2]  # best_bbox[..., 1:2]
 
     # x_center: [bs, 7, 7, 1] | y_center: [bs, 7, 7, 1]
     # logic: we recovered the x_center and y_center from the original yolo format.
@@ -308,9 +305,7 @@ def decode(outputs: torch.Tensor, S: int = 7) -> torch.Tensor:
     # detected_bboxes: [bs, 7, 7, 6]
     # logic: the 6 dimensions are [class_id, best_confidence, x_center, y_center, width, height]
 
-    decoded_bbox = torch.cat(
-        (class_id, best_confidence, converted_bboxes), dim=-1
-    )
+    decoded_bbox = torch.cat((class_id, best_confidence, converted_bboxes), dim=-1)
 
     # logic: the final form here assumes that we have only 1 bbox per cell, hence [bs, 49, 6]
     flattened_decoded_bbox = flatten_decoded_bbox(decoded_bbox, S)
@@ -329,9 +324,7 @@ def flatten_decoded_bbox(decoded_bbox: torch.Tensor, S: int) -> torch.Tensor:
     """
 
     # flattened_decoded_bbox: [bs, 7 * 7, 6] = [bs, 49, 6]
-    flattened_decoded_bbox = decoded_bbox.reshape(
-        decoded_bbox.shape[0], S * S, -1
-    )
+    flattened_decoded_bbox = decoded_bbox.reshape(decoded_bbox.shape[0], S * S, -1)
     # turn class_id to int
     flattened_decoded_bbox[..., 0] = flattened_decoded_bbox[..., 0].long()
 
@@ -400,9 +393,7 @@ if __name__ == "__main__":
     for image, bboxes in voc_dataset_train:
         # print(bboxes)
         print(f"type of image: {type(image)}, type of bboxes: {type(bboxes)}")
-        print(
-            f"shape of image: {image.shape}, shape of bboxes: {bboxes.shape}"
-        )
+        print(f"shape of image: {image.shape}, shape of bboxes: {bboxes.shape}")
         print(f"bboxes: {bboxes}")
 
         break
@@ -439,9 +430,9 @@ if __name__ == "__main__":
 
         image_grid = []
         for image, voc_bbox in zip(images, voc_bboxes):
-            image = torch.from_numpy(
-                np.asarray(FT.to_pil_image(image))
-            ).permute(2, 0, 1)
+            image = torch.from_numpy(np.asarray(FT.to_pil_image(image))).permute(
+                2, 0, 1
+            )
             overlayed_image = torchvision.utils.draw_bounding_boxes(
                 image,
                 voc_bbox,

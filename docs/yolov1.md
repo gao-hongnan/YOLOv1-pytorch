@@ -486,12 +486,13 @@ class Yolov1Darknet(nn.Module):
 We then run a forward pass of the model as a sanity check.
 
 ```{code-cell} ipython3
-batch_size = 16
+batch_size = 4
 image_size = 448
 in_channels = 3
 S = 7
 B = 2
 C = 20
+
 DARKNET_ARCHITECTURE = [
     (64, 7, 2, 3),
     "M",
@@ -515,6 +516,7 @@ DARKNET_ARCHITECTURE = [
 
 x = torch.zeros(batch_size, in_channels, image_size, image_size)
 y_trues = torch.zeros(batch_size, S, S, B * 5 + C)
+
 yolov1 = Yolov1Darknet(
     architecture=DARKNET_ARCHITECTURE,
     in_channels=in_channels,
@@ -522,6 +524,7 @@ yolov1 = Yolov1Darknet(
     B=B,
     C=C,
 )
+
 y_preds = yolov1(x)
 
 print(f"x.shape: {x.shape}")
@@ -760,9 +763,78 @@ and of course they must be the same shape as $\y$.
 Possibly the most important part of the YOLOv1 paper is the loss function, it is also
 the most confusing if you are not familiar with the notation. 
 
+````{admonition} Abuse of Notation
+When I say grid cell $i$, it also means the $i$-th row of the ground truth and prediction matrix.
+````
+
 ### Bipartite Matching
 
 pass
+
+
+### Total Loss for a Single Image
+
+Having the construction of the ground truth and the prediction matrix, it is now time to understand
+how the loss function is formulated. I took the liberty to change the notations from the original
+paper for simplicity.
+
+We define the loss function to be $\L$, a function of $\y$ and $\yhat$ respectively. 
+However, owing to the fact $\y$ and $\yhat$ are both of shape $\R^{49 \times 30}$, 
+it is more beneficial to take a step back and recall that we are actually computing
+the loss over each grid cell $i$ and summing them (49 rows) up afterwards, which constitute
+to our total loss $\L(\y, \yhat)$.
+
+Consequently, we define $\L_i$ to be the loss of each grid cell $i$ and simply say that 
+
+$$
+\begin{align}
+    \L(\y, \yhat) & \overset{(a)}{=}  \sum_{i=1}^{S=7}\sum_{j=1}^{S=7} \L_{ij}(\y_{ij}, \yhat_{ij}) \\
+                  & \overset{(b)}{=} \sum_{i=1}^{S^2=49} \L_i(\y_i, \yhat_i)                        \\
+\end{align}
+$$ (eq:yolov1-total-loss)
+
+but recall that the equation $(a)$ is not used by us as it is more cumbersome in notations, but just remember both are the same.
+
+Equation {eq}`eq:yolov1-total-loss` ***merely*** sums up the loss for 1 single image, 
+however, in deep learning, we also have the concept of batch size, where an additional batch 
+size dimension is added. Rest assured it is as simple as summing over the batches and averaging over batch only
+and will be shown in code later.
+
+### Loss for a Single Grid Cell in a Single Image
+
+Let's zoom in on how to calculate loss for one grid cell $i$.
+
+$$
+    \begin{align}
+        \L_i(\y_i, \yhat_i) & = \color{blue}{\lambda_\textbf{coord} \sum_{j=1}^{B=2} \1_{ij}^{\text{obj}} \lsq \lpar x_i - \hat{x}_i^j \rpar^2 + \lpar y_i - \hat{y}_i^j \rpar^2 \rsq}                             \\
+                            & + \color{blue}{\lambda_\textbf{coord} \sum_{j=1}^{B=2} \1_{ij}^{\text{obj}} \lsq \lpar \sqrt{w_i} - \sqrt{\hat{w}_i^j} \rpar^2 + \lpar \sqrt{h_i} - \sqrt{\hat{h}_i^j} \rpar^2 \rsq} \\
+                            & + \color{green}{\sum_{j=1}^{B=2} \1_{ij}^{\text{obj}} \lpar \conf_i - \confhat_i^j \rpar^2}                                                                                          \\
+                            & + \color{green}{\lambda_\textbf{noobj}\sum_{j=1}^{B=2} \1_{ij}^{\text{noobj}} \lpar \conf_i - \confhat_i^j \rpar^2}                                                                  \\
+                            & + \color{red}{\1_{i}^{\text{obj}} \sum_{c \in \cc} \lpar \p_i(c) - \phat_i(c) \rpar^2}                                                                                               \\
+    \end{align}
+$$
+
+- The 3 $\lambda$ constants are just constants to take into account more one aspect of the loss function. In the article $\lambda_{coord}$ is the highest in order to have the more importance in the first term
+- The prediction of YOLO is a $S*S*(B*5+C)$ vector : $B$ bbox predictions for each grid cells and $C$ class prediction for each grid cell (where $C$ is the number of classes). The 5 bbox outputs of the box j of cell i are coordinates of tte center of the bbox $x_{ij}$ $y_{ij}$ , height $h_{ij}$, width $w_{ij}$ and a confidence index $C_{ij}$
+- I imagine that the values with a hat are the real one read from the label and the one without hat are the predicted ones. So what is the real value from the label for the confidence score for each bbox $\hat{C}_{ij}$ ? It is the intersection over union of the predicted bounding box with the one from the label.
+- $\mathbb{1}_{i}^{obj}$ is $1$ when there is an object in cell $i$ and $0$ elsewhere
+- $\mathbb{1}_{ij}^{obj}$ "denotes that the $j$th bounding box predictor in cell $i$ is responsible for that prediction". In other words, it is equal to $1$ if there is an object in cell $i$ and confidence of the $j$th predictors of this cell is the highest among all the predictors of this cell. $\mathbb{1}_{ij}^{noobj}$ is almost the same except it values 1 when there are NO objects in cell $i$
+
+Note carefully $j$ in this context is the indices of the bounding box predictors in each grid cell i.e. in $\bhat^1$ is the 1st predicted bounding box and the 1 refers to the index $j=1$.
+
+Do not be afraid of the $\1_{ij}^{\text{obj}}$, it simply means that in grid cell $i$, we loop over the number of bounding boxes (which is 2), and then for each predicted bounding box, we check what $\1_{ij}^{\text{obj}}$ evaluates to:
+
+$$
+\1_{ij}^{\text{obj}} = 
+\begin{cases}
+    1     & \textbf{if the jth box in the ith grid cell is matched with a ground truth object in grid cell i}\\
+    0     & \textbf{if the jth box in the ith grid cell is not matched with a ground truth object in grid cell i}
+\end{cases}
+$$
+
+and **what is matched with an object mean? -> it means EXPLAIN HERE ON BIPARTITE MATCH**
+
+but in code implementation
 
 
 [^1]: https://www.harrysprojects.com/articles/yolov1.html

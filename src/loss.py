@@ -424,11 +424,10 @@ class YOLOv1Loss2D(nn.Module):
         self.C = C
         self.lambda_coord = lambda_coord
         self.lambda_noobj = lambda_noobj
-
         # mse = (y_pred - y_true)^2
         # FIXME: still unclean cause by right reduction is not sum since we are
         # adding scalars, but class_loss uses vector sum reduction so need to use for all?
-        self.mse = nn.MSELoss(reduction="sum")
+        self.mse = nn.MSELoss(reduction="none")
 
     # important step if not the curr batch loss will be added to the next batch loss which causes error.
     def _initiate_loss(self) -> None:
@@ -462,9 +461,13 @@ class YOLOv1Loss2D(nn.Module):
         return self.mse(conf_complement_i, confhat_complement_i)
 
     def compute_class_loss(self, p_i, phat_i) -> torch.Tensor:
-        return self.mse(p_i, phat_i)
+        # self.mse(p_i, phat_i) is vectorized version
+        total_class_loss = 0
+        for c in range(self.C):
+            total_class_loss += self.mse(p_i[c], phat_i[c])
+        return total_class_loss
 
-    def forward(self, y_preds: torch.Tensor, y_trues: torch.Tensor):
+    def forward(self, y_trues: torch.Tensor, y_preds: torch.Tensor):
         self._initiate_loss()
 
         # y_trues: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30)
@@ -481,6 +484,7 @@ class YOLOv1Loss2D(nn.Module):
         # batch and loss2 is the loss for the second image in the batch.
         # batch_index is the index of the image in the batch
         for batch_index in range(batch_size):
+            print(f"batch_index {batch_index}")
 
             # subset here to stay consistent with my notes instead of doing it
             # more obscurely as y_trues[batch_index, grid_cell_index, ...] later
@@ -507,6 +511,7 @@ class YOLOv1Loss2D(nn.Module):
                     x_i, y_i, w_i, h_i = b
                     # at this point in time, conf_i is either 0 or 1
                     conf_i = y_true[grid_cell_index, 4]
+                    print("conf_i", conf_i)
 
                     p_i = y_true[grid_cell_index, 10:]
                     phat_i = y_pred[grid_cell_index, 10:]
@@ -578,7 +583,7 @@ class YOLOv1Loss2D(nn.Module):
                             y_true[grid_cell_index, 4],
                             y_pred[grid_cell_index, 4 + j * 5],
                         )
-
+            print("\n")
         total_loss = (
             self.lambda_coord * self.bbox_xy_offset_loss
             + self.lambda_coord * self.bbox_wh_loss
@@ -725,3 +730,19 @@ class YOLOv1Loss2D(nn.Module):
 #                     else:
 #                         # purposely put pass to indicate they all are zero
 #                         pass
+
+
+if __name__ == "__main__":
+    batch_size = 4
+    S, B, C = 7, 2, 20
+    lambda_coord, lambda_noobj = 5, 0.5
+
+    # load directly the first batch of the train loader
+    y_trues = torch.load("y_trues.pt")
+    y_preds = torch.load("y_preds.pt")
+
+    # print(y_trues.shape)
+    # print(y_trues[0][3,3,:])
+
+    criterion = YOLOv1Loss2D(S, B, C, lambda_coord, lambda_noobj)
+    loss = criterion(y_trues, y_preds)

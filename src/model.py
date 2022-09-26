@@ -191,14 +191,14 @@ class Yolov1Darknet(nn.Module):
             # nn.Sigmoid(),
         )
 
-
 if __name__ == "__main__":
-    batch_size = 16
+    batch_size = 4
     image_size = 448
     in_channels = 3
     S = 7
     B = 2
     C = 20
+
     DARKNET_ARCHITECTURE = [
         (64, 7, 2, 3),
         "M",
@@ -222,6 +222,7 @@ if __name__ == "__main__":
 
     x = torch.zeros(batch_size, in_channels, image_size, image_size)
     y_trues = torch.zeros(batch_size, S, S, B * 5 + C)
+
     yolov1 = Yolov1Darknet(
         architecture=DARKNET_ARCHITECTURE,
         in_channels=in_channels,
@@ -229,6 +230,7 @@ if __name__ == "__main__":
         B=B,
         C=C,
     )
+
     y_preds = yolov1(x)
 
     print(f"x.shape: {x.shape}")

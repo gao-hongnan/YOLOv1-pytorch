@@ -48,11 +48,26 @@ $$
 \newcommand{\rsq}{\right]}
 \newcommand{\lpar}{\left(}
 \newcommand{\rpar}{\right)}
-$$
+\newcommand{\jmax}{j_{\max}}
+\newcommand{\obji}{\mathbb{1}_{i}^{\text{obj}}}
+\newcommand{\nobji}{\mathbb{1}_{i}^{\text{noobj}}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+$$ 
 
 # YOLOv1
 
+
+
 ## Notations and Definitions
+
+### Sample Image
+
+```{figure} https://storage.googleapis.com/reighns/images/grid_on_image.PNG
+---
+name: yolov1-sample-image
+---
+Sample Image with Grids.
+```
 
 ### Bounding Box Parametrization
 
@@ -627,7 +642,7 @@ $$
 = \begin{bmatrix}
 \b_i & \conf_i & \b_i & \conf_i & \p_i 
 \end{bmatrix} \in \R^{1 \times 30}
-$$
+$$ (eq:gt_yi)
 
 where
 
@@ -648,6 +663,9 @@ where
   $0$ encoded except at the $\cc$-th index (one hot encoding). In the paper, $\p_i$ is defined as 
   $\P(\text{Class}_i \mid \text{Obj})$ which means that $\p_i$ is conditioned on the grid cell given
   there exists an object, which means for grid cells $i$ without any objects, $\p_i$ is a zero vector.
+
+$\y_i$ will be initiated as a zero vector, and will remain a zero vector if there are no objects in
+grid cell $i$. Otherwise, we will update the elements of $\y_i$ as per the above definitions.
 
 Then the ground truth matrix $\y$ is constructed as follows:
 
@@ -769,7 +787,34 @@ When I say grid cell $i$, it also means the $i$-th row of the ground truth and p
 
 ### Bipartite Matching
 
-pass
+ref: https://www.harrysprojects.com/articles/yolov1.html
+
+In our example image, there are 2 ground truth bounding box dog and human in that image. Let us zoom into just 1 grid cell's 30 element vector, say the dog (maybe input numbers here?) lie in the grid cell (3, 5) and therefore index is 26.
+
+![](https://storage.googleapis.com/reighns/images/flattened_grid_cell.jpg)
+
+
+The question that I had was that there is only 1 ground truth bbox coordinates for the dog $\b_{26}$, how then should we choose the which of the two predicted bounding boxes to compare to in the loss function? That is where the "matching happens", basically out of the two bounding box predicted by the model $\bhat_{26}^1$ and $\bhat_{26}^2$, only one can survive to eventually compare with the ground truth, and that is done by computing the IOU between the ground truth $\b_{26}$ with each $\bhat_{26}^1$ and $\bhat_{26}^2$ respectively and choosing the one with the highest IOU to be the survivor.
+
+This is why in the construction of the ground truth we have this:
+
+$$
+\conf = 
+\begin{cases}
+    1  = 1 \times \iou       & \text{if } \textbf{grid cell i has an object}\\
+    0  = 0  \times \iou      & \text{otherwise}
+\end{cases}
+$$
+
+where we define the confidence score of the ground truth to be the IOU between the ground truth $\b_{26}$ and the "survivor" $\bhat_{26}$, chosen out of the two predictions, as was shown $\underset{\bhat_i \in \{\bhat_i^1, \bhat_i^2\}}{\max}\textbf{IOU}(\b_i, \bhat_i)$.
+
+But why during our construction of the ground truth we have to put a placeholder $1$ or $0$ first? That is because before the model predictions were made, there is no way we know the IOU between the ground truth and the predicted bounding boxes.
+
+**(Put admonition note)**
+
+What we have described above is a form of matching algorithm. To reiterate, a model like YOLOv1 can output and predict multiple $B$ number of bounding boxes ($B=2$), but you need to choose one out of the $B$ predicted bounding boxes to compute/compare with the ground truth bounding box. In YOLOv1, they used the same matching algorithm that two-staged detectors like Faster RCNN use, which use the IOU between the ground truth and predicted bounding boxes to determine matching, (i.e ground truth in grid cell i will match to the predicted bbox in grid cell i with the highest IOU between them).
+
+It's also worth pointing out that two-stage architectures also specify a minimum IOU for defining negative background boxes, and their loss functions explicitly ignore all predicted boxes that fall between these thresholds. YOLO doesn't do this, most likely because it's producing so few boxes anyway that it isn't a problem in practice. (https://www.harrysprojects.com/articles/yolov1.html)
 
 
 ### Total Loss for a Single Image
@@ -810,13 +855,10 @@ $$
                             & + \color{blue}{\lambda_\textbf{coord} \sum_{j=1}^{B=2} \1_{ij}^{\text{obj}} \lsq \lpar \sqrt{w_i} - \sqrt{\hat{w}_i^j} \rpar^2 + \lpar \sqrt{h_i} - \sqrt{\hat{h}_i^j} \rpar^2 \rsq} \\
                             & + \color{green}{\sum_{j=1}^{B=2} \1_{ij}^{\text{obj}} \lpar \conf_i - \confhat_i^j \rpar^2}                                                                                          \\
                             & + \color{green}{\lambda_\textbf{noobj}\sum_{j=1}^{B=2} \1_{ij}^{\text{noobj}} \lpar \conf_i - \confhat_i^j \rpar^2}                                                                  \\
-                            & + \color{red}{\1_{i}^{\text{obj}} \sum_{c \in \cc} \lpar \p_i(c) - \phat_i(c) \rpar^2}                                                                                               \\
+                            & + \color{red}{\obji \sum_{c \in \cc} \lpar \p_i(c) - \phat_i(c) \rpar^2}                                                                                               \\
     \end{align}
 $$
 
-- The 3 $\lambda$ constants are just constants to take into account more one aspect of the loss function. In the article $\lambda_{coord}$ is the highest in order to have the more importance in the first term
-- The prediction of YOLO is a $S*S*(B*5+C)$ vector : $B$ bbox predictions for each grid cells and $C$ class prediction for each grid cell (where $C$ is the number of classes). The 5 bbox outputs of the box j of cell i are coordinates of tte center of the bbox $x_{ij}$ $y_{ij}$ , height $h_{ij}$, width $w_{ij}$ and a confidence index $C_{ij}$
-- I imagine that the values with a hat are the real one read from the label and the one without hat are the predicted ones. So what is the real value from the label for the confidence score for each bbox $\hat{C}_{ij}$ ? It is the intersection over union of the predicted bounding box with the one from the label.
 - $\mathbb{1}_{i}^{obj}$ is $1$ when there is an object in cell $i$ and $0$ elsewhere
 - $\mathbb{1}_{ij}^{obj}$ "denotes that the $j$th bounding box predictor in cell $i$ is responsible for that prediction". In other words, it is equal to $1$ if there is an object in cell $i$ and confidence of the $j$th predictors of this cell is the highest among all the predictors of this cell. $\mathbb{1}_{ij}^{noobj}$ is almost the same except it values 1 when there are NO objects in cell $i$
 
@@ -834,7 +876,76 @@ $$
 
 and **what is matched with an object mean? -> it means EXPLAIN HERE ON BIPARTITE MATCH**
 
-but in code implementation
+### Change of Notation
+
+Let $\jmax$ be the index of the bounding box with the highest confidence score in cell $i$.
+
+$\jmax = \underset{j \in \{1,2\}}{\operatorname{argmax}} \textbf{IOU}(\b_i, \bhat_i^j)$
+
+
+
+$$
+    \begin{align}
+        \L_i(\y_i, \yhat_i) & \overset{(a)}{=}  \color{blue}{\lambda_\textbf{coord} \obji \lsq \lpar x_i - \hat{x}_i^{\jmax} \rpar^2 + \lpar y_i - \hat{y}_i^{\jmax}  \rpar^2 \rsq}                             \\
+                            & \overset{(b)}{+}  \color{blue}{\lambda_\textbf{coord} \obji \lsq \lpar \sqrt{w_i} - \sqrt{\hat{w}_i^{\jmax} } \rpar^2 + \lpar \sqrt{h_i} - \sqrt{\hat{h}_i^{\jmax} } \rpar^2 \rsq} \\
+                            & \overset{(c)}{+}  \color{green}{\obji \lpar \conf_i - \confhat_i^{\jmax} \rpar^2}                                                                                          \\
+                            & \overset{(d)}{+} \color{green}{\lambda_\textbf{noobj} \nobji \lpar \conf_i - \confhat_i^{\jmax} \rpar^2}                                                                  \\
+                            & \overset{(e)}{+}  \color{red}{\obji \sum_{c \in \cc} \lpar \p_i(c) - \phat_i(c) \rpar^2}                                                                                               \\
+    \end{align}
+$$
+
+thereby collapsing the equation to checking only two conditions:
+- $\obji$ is $1$ when there is an object in cell $i$ and $0$ elsewhere
+- $\1_{i}^{\text{noobj}}$ is $1$ when there is no object in cell $i$ and $0$ elsewhere
+
+- $\y_i$ is exactly as defined in {prf:ref}`yolo_gt_matrix`'s equation {eq}`eq:gt_yi`.
+
+
+### Walkthrough
+
+1st image in the batch has objects in row 24 and 30 (human, dog at 3,3 and 2,4)
+
+- loop over batch
+    - `y_true` is the ground truth matrix of shape `(49, 30)`;
+    - `y_pred` is the predicted matrix of shape `(49, 30)`;
+    - loop over grid cells from 0 to 48
+    - loop 0 `i=0`:
+        - `y_true_i` is the ground truth matrix of shape `(1, 30)` for the cell `i=0`;
+        - Notice that we know in advance that in this grid cell $0$ there is no ground truth object
+          and hence `y_true_i` is an all zero vector, by {prf:ref}`yolo_gt_matrix`.
+
+        - `y_pred_i` is the predicted matrix of shape `(1, 30)` for the cell `i=0`;
+        
+        - `indicator_obj_i` corresponds to $\obji$ in the equation above and is
+          equal to $0$ since there is no object in cell $i=0$. 
+        
+        - We do not explicitly define `indicator_noobj_i` to correspond to $\nobji$
+          but it is equal to $1$ since there is no object in cell $i=0$. This means
+          that it will not go through the `if` clause in `line ??` and will go through
+          `else` clause in `line ??` and will compute the loss for the no object equation
+          at $d$ equation above.
+
+        - **No object loss**: `line xx-xx` means we are looping over the 2 bounding boxes in cell $i=0$.
+            - Loop over $j=0$
+                - `y_true[i, 4]` is the confidence score of the 1st bounding box in cell $i=0$.
+                - It is equal to $0$ since there is no object in cell $i=0$ by {prf:ref}`gt-confidence`.
+                - `y_pred[i, 4]` is the confidence score of the 1st bounding box in cell $i=0$.
+                - We will compute the mean squared error between the ground truth confidence
+                score and the predicted confidence score of the 1st predicted bounding box.
+            - Loop over $j=1$
+                - We still use `y_true[i, 4]` because the `y_true[i, 9]` is same as `y_true[i, 4]` by
+                  construction in {prf:ref}`yolo_gt_matrix`.  
+                - `y_pred[i, 9]` is the confidence score of the 2nd bounding box in cell $i=0$.
+                - We will compute the mean squared error between the ground truth confidence score and
+                  the predicted confidence score of the 2nd predicted bounding box.
+            - Finally, these two errors are summed up to be `self.no_object_conf_loss`. We will put the 
+              $\lambda_\textbf{noobj}$ in front of this loss in the `line ??` of the code later.
+
+
+## References
+
+s
+
 
 
 [^1]: https://www.harrysprojects.com/articles/yolov1.html

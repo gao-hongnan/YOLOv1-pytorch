@@ -1,17 +1,10 @@
 import torch
-import torchvision.transforms as transforms
-import torchvision.transforms.functional as FT
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from model import Yolov1Darknet
 from train import train_one_epoch, valid_one_epoch
 from dataset import VOCDataset, get_transform
-from utils import (
-    non_max_suppression,
-    mean_average_precision,
-    intersection_over_union,
-    seed_all,
-)
+from utils import seed_all
 from loss import YoloLoss, YOLOv1Loss, YOLOv1Loss2D
 from config import config
 

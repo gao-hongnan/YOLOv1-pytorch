@@ -19,6 +19,67 @@ import matplotlib.patches as patches
 from collections import Counter
 import os
 import random
+from typing import Union
+import copy
+
+BboxType = Union[np.ndarray, torch.Tensor]
+
+import numpy as np
+
+
+def bmatrix(a):
+    """Returns a LaTeX bmatrix
+
+    :a: numpy array
+    :returns: LaTeX bmatrix as a string
+    """
+    if len(a.shape) > 2:
+        raise ValueError("bmatrix can at most display two dimensions")
+    lines = (
+        np.array2string(
+            a,
+            max_line_width=np.infty,
+            formatter={"float_kind": lambda x: "{:.2e}".format(x)},
+        )
+        .replace("[", "")
+        .replace("]", "")
+        .splitlines()
+    )
+    rv = [r"\begin{bmatrix}"]
+    rv += ["  " + " & ".join(l.split()) + r"\\" for l in lines]
+    rv += [r"\end{bmatrix}"]
+    return "\n".join(rv)
+
+
+def cast_int_to_float(inputs: BboxType) -> BboxType:
+    """Converts int to float.
+
+    Args:
+        inputs (BboxType): Input bounding box.
+
+    Returns:
+        (BboxType): Bounding box with float type.
+    """
+    if isinstance(inputs, torch.Tensor):
+        return inputs.float()
+    return inputs.astype(np.float32)
+
+
+def clone(inputs: BboxType) -> BboxType:
+    """Clones bounding box.
+
+    Note:
+        copy.deepcopy() does not work for autograd tensors.
+
+    Args:
+        inputs (BboxType): Input bounding box.
+
+    Returns:
+        (BboxType): Cloned bounding box.
+    """
+    if isinstance(inputs, torch.Tensor):
+        return inputs.clone()
+    return inputs.copy()
 
 
 def seed_all(seed: int = 1992) -> None:
@@ -39,9 +100,10 @@ def seed_all(seed: int = 1992) -> None:
     torch.backends.cudnn.enabled = False
 
 
+# pylint: disable=too-many-locals
 def intersection_over_union(
-    bbox_1: torch.Tensor, bbox_2: torch.Tensor, bbox_format: str = "yolo"
-):
+    bbox_1: BboxType, bbox_2: BboxType, bbox_format: str = "yolo"
+) -> torch.Tensor:
     """Calculates intersection over union between two bounding boxes.
 
     Note:
@@ -61,35 +123,39 @@ def intersection_over_union(
         shape of (16, 7, 7, 4).
 
     Args:
-        bbox_1 (tensor): Bounding Box 1.
-        bbox_2 (tensor): Bounding Box 2.
-        bbox_format (str): Either yolo format (x, y, w, h) or pascal_voc format (x_min, y_min, x_max, y_max).
+        bbox_1 (BboxType): Bounding Box 1 of shape (1, 4).
+        bbox_2 (BboxType): Bounding Box 2 of shape (1, 4).
+        bbox_format (str): The format of the bounding boxes. Default is "yolo" and
+            must be one of the following: ["yolo", "voc", "albu"]
 
     Returns:
-        tensor: Intersection over union for all samples.
-    """
+        iou (torch.Tensor): Intersection over union for each pair of bounding boxes.
+            The shape is a scalar.
 
-    assert bbox_format in ["yolo", "voc"]
+    References:
+        Code modified from https://github.com/aladdinpersson/Machine-Learning-Collection
+    """
+    assert bbox_format in ["yolo", "voc", "albu"]
+
+    if isinstance(bbox_1, np.ndarray):
+        bbox_1 = torch.from_numpy(bbox_1)
+
+    if isinstance(bbox_2, np.ndarray):
+        bbox_2 = torch.from_numpy(bbox_2)
 
     if bbox_format == "yolo":
-        box1_x1 = bbox_1[..., 0:1] - bbox_1[..., 2:3] / 2
-        box1_y1 = bbox_1[..., 1:2] - bbox_1[..., 3:4] / 2
-        box1_x2 = bbox_1[..., 0:1] + bbox_1[..., 2:3] / 2
-        box1_y2 = bbox_1[..., 1:2] + bbox_1[..., 3:4] / 2
-        box2_x1 = bbox_2[..., 0:1] - bbox_2[..., 2:3] / 2
-        box2_y1 = bbox_2[..., 1:2] - bbox_2[..., 3:4] / 2
-        box2_x2 = bbox_2[..., 0:1] + bbox_2[..., 2:3] / 2
-        box2_y2 = bbox_2[..., 1:2] + bbox_2[..., 3:4] / 2
+        bbox_1 = yolo2albu(bbox_1)
+        bbox_2 = yolo2albu(bbox_2)
 
-    if bbox_format == "voc":
-        box1_x1 = bbox_1[..., 0:1]
-        box1_y1 = bbox_1[..., 1:2]
-        box1_x2 = bbox_1[..., 2:3]
-        box1_y2 = bbox_1[..., 3:4]  # (N, 1)
-        box2_x1 = bbox_2[..., 0:1]
-        box2_y1 = bbox_2[..., 1:2]
-        box2_x2 = bbox_2[..., 2:3]
-        box2_y2 = bbox_2[..., 3:4]
+    # at this stage bbox must be in either albu or voc format.
+    box1_x1 = bbox_1[..., 0:1]
+    box1_y1 = bbox_1[..., 1:2]
+    box1_x2 = bbox_1[..., 2:3]
+    box1_y2 = bbox_1[..., 3:4]
+    box2_x1 = bbox_2[..., 0:1]
+    box2_y1 = bbox_2[..., 1:2]
+    box2_x2 = bbox_2[..., 2:3]
+    box2_y2 = bbox_2[..., 3:4]
 
     x1 = torch.max(box1_x1, box2_x1)
     y1 = torch.max(box1_y1, box2_y1)
@@ -102,7 +168,12 @@ def intersection_over_union(
     box1_area = abs((box1_x2 - box1_x1) * (box1_y2 - box1_y1))
     box2_area = abs((box2_x2 - box2_x1) * (box2_y2 - box2_y1))
 
-    return intersection / (box1_area + box2_area - intersection + 1e-6)
+    iou = intersection / (box1_area + box2_area - intersection + 1e-6)
+    # https://pytorch.org/docs/stable/generated/torch.Tensor.item.html
+    # squeeze all dimensions to scalar
+    iou = iou.item()
+
+    return iou
 
 
 def non_max_suppression(
@@ -278,156 +349,64 @@ def mean_average_precision(
     return sum(average_precisions) / len(average_precisions)
 
 
-def voc2coco(
-    bboxes: Union[np.ndarray, torch.Tensor]
-) -> Union[np.ndarray, torch.Tensor]:
-    """Convert pascal_voc to coco format.
+def yolo2voc(inputs: BboxType, height: float, width: float) -> BboxType:
+    """Converts from normalized [x, y, w, h] to [x1, y1, x2, y2] format.
 
-    voc  => [xmin, ymin, xmax, ymax]
-    coco => [xmin, ymin, w, h]
+    (x, y): the coordinates of the center of the bounding box;
+    (w, h): the width and height of the bounding box.
+    (x1, y1): the coordinates of the top left corner of the bounding box;
+    (x2, y2): the coordinates of the bottom right corner of the bounding box.
 
-    Args:
-        bboxes (torch.Tensor): Shape of (N, 4) where N is the number of samples and 4 is the coordinates [xmin, ymin, xmax, ymax].
-
-    Returns:
-        coco_bboxes (torch.Tensor): Shape of (N, 4) where N is the number of samples and 4 is the coordinates [xmin, ymin, w, h].
-    """
-
-    # careful in place can cause mutation
-    bboxes[..., 2:4] -= bboxes[..., 0:2]
-
-    return bboxes
-
-
-def coco2voc(
-    bboxes: Union[np.ndarray, torch.Tensor]
-) -> Union[np.ndarray, torch.Tensor]:
-    """Convert coco to pascal_voc format.
-
-    coco => [xmin, ymin, w, h]
-    voc  => [xmin, ymin, xmax, ymax]
-
+    [x1, y1, x2, y2] is calculated as:
+    x1 = x * width - w * width / 2
+    y1 = y * height - h * height / 2
+    x2 = x * width + w * width / 2
+    y2 = y * height + h * height / 2
 
     Args:
-        bboxes (torch.Tensor): Shape of (N, 4) where N is the number of samples and 4 is the coordinates [xmin, ymin, w, h].
+        inputs (BboxType): Input bounding boxes of shape (..., 4) with the format
+            `(center x, center y, width, height)` normalized by image width and
+            height.
+        height (float): Height of the image frame.
+        width (float): Width of the image frame.
 
     Returns:
-        voc_bboxes (torch.Tensor): Shape of (N, 4) where N is the number of samples and 4 is the coordinates [xmin, ymin, xmax, ymax].
+        outputs (BboxType): Bounding boxes of shape (..., 4) with the format `(top
+            left x, top left y, bottom right x, bottom right y)`.
     """
+    outputs = clone(inputs)
+    outputs = cast_int_to_float(outputs)
 
-    # careful in place can cause mutation
-    bboxes[..., 2:4] += bboxes[..., 0:2]
+    outputs[..., [0, 2]] *= width
+    outputs[..., [1, 3]] *= height
 
-    return bboxes
+    outputs[..., 0] -= outputs[..., 2] / 2
+    outputs[..., 1] -= outputs[..., 3] / 2
+    outputs[..., 2] += outputs[..., 0]
+    outputs[..., 3] += outputs[..., 1]
 
-
-def voc2yolo(
-    bboxes: Union[np.ndarray, torch.Tensor],
-    height: int = 720,
-    width: int = 1280,
-) -> Union[np.ndarray, torch.Tensor]:
-    """
-    voc  => [x1, y1, x2, y1]
-    yolo => [xmid, ymid, w, h] (normalized)
-    """
-
-    # otherwise all value will be 0 as voc_pascal dtype is np.int
-    # bboxes = bboxes.copy().astype(float)
-
-    bboxes[..., 0::2] /= width
-    bboxes[..., 1::2] /= height
-
-    bboxes[..., 2] -= bboxes[..., 0]
-    bboxes[..., 3] -= bboxes[..., 1]
-
-    bboxes[..., 0] += bboxes[..., 2] / 2
-    bboxes[..., 1] += bboxes[..., 3] / 2
-
-    return bboxes
+    return outputs
 
 
-def yolo2voc(
-    bboxes: Union[np.ndarray, torch.Tensor],
-    height: int = 720,
-    width: int = 1280,
-) -> Union[np.ndarray, torch.Tensor]:
-    """
-    yolo => [xmid, ymid, w, h] (normalized)
-    voc  => [x1, y1, x2, y1]
-    """
+def yolo2albu(inputs: BboxType) -> BboxType:
+    """Converts from normalized [x, y, w, h] to [x1, y1, x2, y2] normalized format.
 
-    # otherwise all value will be 0 as voc_pascal dtype is np.int
-    bboxes = (
-        bboxes.copy().astype(float)
-        if isinstance(bboxes, np.ndarray)
-        else bboxes.clone().float()
-    )
-
-    bboxes[..., 0] -= bboxes[..., 2] / 2
-    bboxes[..., 1] -= bboxes[..., 3] / 2
-
-    bboxes[..., 2] += bboxes[..., 0]
-    bboxes[..., 3] += bboxes[..., 1]
-
-    bboxes[..., 0::2] *= width
-    bboxes[..., 1::2] *= height
-
-    return bboxes
-
-
-def voc2vocn(
-    bboxes: Union[np.ndarray, torch.Tensor], height: float, width: float
-) -> Union[np.ndarray, torch.Tensor]:
-    """Converts from [x1, y1, x2, y2] to normalized [x1, y1, x2, y2].
-    Normalized coordinates are w.r.t. original image size.
-    (x1, y1) is the top left corner and (x2, y2) is the bottom right corner.
-    Normalized [x1, y1, x2, y2] is calculated as:
-    Normalized x1 = x1 / width
-    Normalized y1 = y1 / height
-    Normalized x2 = x2 / width
-    Normalized y2 = y2 / height
-    Example:
-        >>> a = xyxy2xyxyn(inputs=np.array([[1.0, 2.0, 30.0, 40.0]]), height=100, width=200)
-        >>> a
-        array([[0.005, 0.02, 0.15, 0.4]])
     Args:
-        inputs (np.ndarray): Input bounding boxes (2-d array) each with the
-            format `(top left x, top left y, bottom right x, bottom right y)`.
+        inputs (BboxType): Input bounding boxes of shape (..., 4) with the format
+            `(center x, center y, width, height)` normalized by image width and
+            height.
+
     Returns:
-        (np.ndarray): Bounding boxes with the format `normalized (top left x,
-        top left y, bottom right x, bottom right y)`.
+        outputs (BboxType): Bounding boxes of shape (..., 4) with the format `(top
+            left x, top left y, bottom right x, bottom right y)` normalized by
+            image width and height.
     """
+    outputs = clone(inputs)
+    outputs = cast_int_to_float(outputs)
 
-    bboxes[..., [0, 2]] = bboxes[..., [0, 2]] / width
-    bboxes[..., [1, 3]] = bboxes[..., [1, 3]] / height
+    outputs[..., 0] -= outputs[..., 2] / 2
+    outputs[..., 1] -= outputs[..., 3] / 2
+    outputs[..., 2] += outputs[..., 0]
+    outputs[..., 3] += outputs[..., 1]
 
-    return bboxes
-
-
-def vocn2voc(
-    bboxes: Union[np.ndarray, torch.Tensor], height: float, width: float
-):
-    """Converts from normalized [x1, y1, x2, y2] to [x1, y1, x2, y2].
-    Normalized coordinates are w.r.t. original image size.
-    (x1, y1) is the top left corner and (x2, y2) is the bottom right corner.
-    Normalized [x1, y1, x2, y2] is calculated as:
-    Normalized x1 = x1 / width
-    Normalized y1 = y1 / height
-    Normalized x2 = x2 / width
-    Normalized y2 = y2 / height
-    Example:
-        >>> a = xyxyn2xyxy(inputs=np.array([[0.005, 0.02, 0.15, 0.4]]), height=100, width=200)
-        >>> a
-        array([[1., 2., 30., 40.]])
-    Args:
-        inputs (np.ndarray): Input bounding boxes (2-d array) each with the
-            format `(top left x, top left y, bottom right x, bottom right y)`.
-    Returns:
-        (np.ndarray): Bounding boxes with the format `normalized (top left x,
-        top left y, bottom right x, bottom right y)`.
-    """
-
-    bboxes[..., [0, 2]] = bboxes[..., [0, 2]] * width
-    bboxes[..., [1, 3]] = bboxes[..., [1, 3]] * height
-
-    return bboxes
+    return outputs

@@ -1,12 +1,9 @@
 """
 Implementation of Yolo Loss Function from the original yolo paper
 """
-from msvcrt import kbhit
-import re
 import torch
 from torch import nn
 from utils import intersection_over_union
-from torch import autograd
 
 
 class YoloLoss(nn.Module):
@@ -614,6 +611,8 @@ class YOLOv1Loss2D(nn.Module):
         # FIXME: still unclean cause by right reduction is not sum since we are
         # adding scalars, but class_loss uses vector sum reduction so need to use for all?
         self.mse = nn.MSELoss(reduction="none")
+        
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # important step if not the curr batch loss will be added to the next batch loss which causes error.
     def _initiate_loss(self) -> None:
@@ -641,10 +640,8 @@ class YOLOv1Loss2D(nn.Module):
     def compute_object_conf_loss(self, conf_i, confhat_i) -> torch.Tensor:
         return self.mse(conf_i, confhat_i)
 
-    def compute_no_object_conf_loss(
-        self, conf_complement_i, confhat_complement_i
-    ) -> torch.Tensor:
-        return self.mse(conf_complement_i, confhat_complement_i)
+    def compute_no_object_conf_loss(self, conf_i, confhat_i) -> torch.Tensor:
+        return self.mse(conf_i, confhat_i)
 
     def compute_class_loss(self, p_i, phat_i) -> torch.Tensor:
         # self.mse(p_i, phat_i) is vectorized version
@@ -670,7 +667,9 @@ class YOLOv1Loss2D(nn.Module):
             # this is the gt and pred matrix in my notes: y and yhat
             y_true = y_trues[batch_index]  # (49, 30)
             y_pred = y_preds[batch_index]  # (49, 30)
-            print(f"y_true {y_true}")
+            # print(bmatrix(y_true.cpu().detach().numpy()))
+            # print(bmatrix(y_pred.cpu().detach().numpy()))
+            # print(f"y_true {y_true}")
 
             # i is the grid cell index in my notes ranging from 0 to 48
             for i in range(self.S * self.S):
@@ -678,6 +677,7 @@ class YOLOv1Loss2D(nn.Module):
 
                 y_true_i = y_true[i]  # (30,) or (1, 30)
                 y_pred_i = y_pred[i]  # (30,) or (1, 30)
+
                 # print(f"y_i={y_true_i}")
                 # print(f"yhat_i={y_pred_i}")
 
@@ -694,96 +694,79 @@ class YOLOv1Loss2D(nn.Module):
                     bhat_2 = y_pred_i[5:9]
                     # print(f"b {b}\nbhat_1 {bhat_1}\nbhat_2 {bhat_2}")
 
-                    # area of overlap
-                    iou_b1 = intersection_over_union(b, bhat_1, bbox_format="yolo")[0]
-                    iou_b2 = intersection_over_union(b, bhat_2, bbox_format="yolo")[0]
-
                     x_i, y_i, w_i, h_i = b
                     # print(f"x_i {x_i}, y_i {y_i}, w_i {w_i}, h_i {h_i}")
-                    # at this point in time, conf_i is either 0 or 1
-                    conf_i = y_true_i[4]
-                    # print("conf_i", conf_i)
 
                     p_i = y_true_i[10:]
                     phat_i = y_pred_i[10:]
 
+                    # area of overlap
+                    iou_b1 = intersection_over_union(b, bhat_1, bbox_format="yolo")
+                    iou_b2 = intersection_over_union(b, bhat_2, bbox_format="yolo")
+
                     # max iou
                     if iou_b1 > iou_b2:
-                        xhat_i = bhat_1[..., 0]
-                        yhat_i = bhat_1[..., 1]
-                        what_i = bhat_1[..., 2]
-                        hhat_i = bhat_1[..., 3]
+                        xhat_i, yhat_i, what_i, hhat_i = bhat_1
                         # conf_i = max_{bhat \in {bhat_1, bhat_2}} IoU(b, bhat)
-                        # by right should be iou_b1 but y_true[i, 4] gives better results as of now
-                        conf_i = y_true_i[4]
-                        # can be denoted Chat1_i
-                        confhat_i = y_pred_i[4]
+                        # however I set conf_i = y_true_i[4] = 1 here as it gives better results for our case
+                        conf_i, confhat_i = y_true_i[4], y_pred_i[4]
+                        
+                        # fmt: off
+                        # equation 1
+                        self.bbox_xy_offset_loss += self.lambda_coord * self.compute_xy_offset_loss(x_i, xhat_i, y_i, yhat_i)
+
+                        # make them abs as sometimes the preds can be negative if no sigmoid layer.
+                        # add 1e-6 for stability
+                        self.bbox_wh_loss += self.lambda_coord * self.compute_wh_loss(w_i, what_i, h_i, hhat_i)
+
+                        self.object_conf_loss += self.compute_object_conf_loss(conf_i, confhat_i)
+
+                        # mention 2 other ways
                         # iou比较小的bbox不负责预测物体，因此confidence loss算在noobj中，注意，对于标签的置信度应该是iou2
-                        conf_complement_i = iou_b2
-                        confhat_complement_i = y_pred_i[9]
+                        # we can set conf_i = iou_b2 as well as the smaller of the two should be optimized to say there exist no object instead of proposing something.
+                        # we can set conf_i = 0 as well and it will work.
+                        self.no_object_conf_loss += self.lambda_noobj * self.compute_no_object_conf_loss(conf_i=torch.tensor(0., device="cuda"), confhat_i=y_pred_i[9])
+
                     else:
-                        xhat_i = bhat_2[..., 0]
-                        yhat_i = bhat_2[..., 1]
-                        what_i = bhat_2[..., 2]
-                        hhat_i = bhat_2[..., 3]
-                        # by right should be iou_b2 but y_true[i, 4] gives better results as of now
-                        # note y_true[i, 4] is the same as y_true[i, 9]
-                        conf_i = y_true_i[9]
+                        xhat_i, yhat_i, what_i, hhat_i = bhat_2
+                        # same as above
+                        conf_i, confhat_i = y_true_i[4], y_pred_i[9]
 
-                        # can be denoted Chat2_i
-                        confhat_i = y_pred_i[9]
-                        # iou比较小的bbox不负责预测物体，因此confidence loss算在noobj中，注意，对于标签的置信度应该是iou1
-                        conf_complement_i = iou_b1
-                        confhat_complement_i = y_pred_i[4]
+                        # equation 1
+                        self.bbox_xy_offset_loss += self.lambda_coord * self.compute_xy_offset_loss(x_i, xhat_i, y_i, yhat_i)
 
-                    # equation 1
-                    self.bbox_xy_offset_loss += self.compute_xy_offset_loss(
-                        x_i, xhat_i, y_i, yhat_i
-                    )
+                        # make them abs as sometimes the preds can be negative if no sigmoid layer.
+                        # add 1e-6 for stability
+                        self.bbox_wh_loss += self.lambda_coord * self.compute_wh_loss(w_i, what_i, h_i, hhat_i)
 
-                    # make them abs as sometimes the preds can be negative if no sigmoid layer.
-                    # add 1e-6 for stability
-                    self.bbox_wh_loss += self.compute_wh_loss(w_i, what_i, h_i, hhat_i)
+                        self.object_conf_loss += self.compute_object_conf_loss(conf_i, confhat_i)
 
-                    self.object_conf_loss += self.compute_object_conf_loss(
-                        conf_i, confhat_i
-                    )
-
-                    # obscure as hell no_object_conf_loss...
-
-                    # self.no_object_conf_loss = (
-                    #     self.no_object_conf_loss
-                    #     + self.mse(C_complement_ij, Chat_complement_ij)
-                    # )
-                    # FIXME: by right this is not the same as paper but gives better initial results
-                    # FIXME: REMOVED on 25 september 2022 cause I think no need.
-                    self.no_object_conf_loss = self.no_object_conf_loss + torch.sum(
-                        (0 - confhat_complement_i) ** 2
-                    )
+                        # mention 2 other ways
+                        # we can set conf_i = iou_b1 as well as the smaller of the two should be optimized to say there exist no object instead of proposing something.
+                        # we can set conf_i = 0 as well and it will work.
+                        self.no_object_conf_loss += self.lambda_noobj * self.compute_no_object_conf_loss(conf_i=torch.tensor(0., device=self.device), confhat_i=y_pred_i[4])
 
                     self.class_loss += self.compute_class_loss(p_i, phat_i)
                 else:
-                    # no_object_conf is constructed to be 0 in ground truth y
-                    # can use mse but need to put torch.tensor(0) to gpu
-                    # broadcast using 0
-                    # FIXME: consider unpack 0 from b
-                    # conf_i = 0 for ground truth by definition
-                    # essentially just 0 - confhat_i for 2 bboxes
+                    # equation 4
+                    # recall if there is no object, then conf_i is 0 by definition i.e. y_true_i[4] = 0
+                    # confhat_i is y_pred_i[4] and y_pred_i[9] 
+                    # it is worth noting that we loop over both bhat_1 and bhat_2 and calculate
+                    # the no object loss for both of them. This is because we want to penalize
+                    # the model for predicting an object when there is no object **for both bhat_1 and bhat_2**.
+                    # in paper it seems that they only penalize for bhat_i^{\jmax} since they used 1_{i}^{noobj} notation
                     for j in range(self.B):
-                        self.no_object_conf_loss += self.mse(
-                            y_true_i[4],
-                            y_pred_i[4 + j * 5],
-                        )
+                        self.no_object_conf_loss += self.lambda_noobj * self.compute_no_object_conf_loss(conf_i=y_true_i[4], confhat_i=y_pred_i[4 + j * 5])
 
-            # print("\n")
-            # break
+
         total_loss = (
-            self.lambda_coord * self.bbox_xy_offset_loss
-            + self.lambda_coord * self.bbox_wh_loss
+            self.bbox_xy_offset_loss
+            + self.bbox_wh_loss
             + self.object_conf_loss
-            + self.lambda_noobj * self.no_object_conf_loss
+            + self.no_object_conf_loss
             + self.class_loss
         )
+
         # if dataloader has a batch size of 2, then our total loss is the average of the two losses.
         # i.e. total_loss = (loss1 + loss2) / 2 where loss1 is the loss for the first image in the
         # batch and loss2 is the loss for the second image in the batch.
@@ -791,7 +774,6 @@ class YOLOv1Loss2D(nn.Module):
         # print(f"total_loss_averaged_over_batch {total_loss_averaged_over_batch}")
 
         return total_loss_averaged_over_batch
-
 
 # # reshape to [49, 30] from [7, 7, 30]
 # # incorporate bbox index in the B=2 dimension

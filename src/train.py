@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 import os
 import sys
+from torch import autograd
 
 sys.path.insert(1, os.getcwd())
 from utils import non_max_suppression, yolo2voc
@@ -20,7 +21,7 @@ import numpy as np
 from config import config
 from torch.utils.data import DataLoader
 from model import Yolov1Darknet
-from loss import YoloLoss
+from loss import YoloLoss, YOLOv1Loss
 
 ClassMap = config.ClassMap()
 
@@ -62,6 +63,7 @@ def train_one_epoch(
     train_loss_epoch_history = []
     train_loss = 0
 
+
     for batch_idx, (inputs, y_trues) in enumerate(train_bar):
         # inputs: (batch_size, 3, 448, 448)
         # y_trues: (batch_size, 7, 7, 30)
@@ -69,16 +71,18 @@ def train_one_epoch(
 
         # y_preds: (batch_size, 7 * 7 * 30) -> (batch_size, 1470)
         y_preds = model(inputs)
-
+        #np.savetxt(f"batch_{batch_idx}_y_preds.txt", y_preds.detach().cpu().numpy())
         # y_trues_decoded: (batch_size, 7, 7, 6) -> (batch_size, 7 * 7, 6)
         # [class_id, obj_conf, x, y, w, h]
         y_trues_decoded = decode(y_trues.detach().cpu())
         y_preds_decoded = decode(y_preds.detach().cpu())
+        #np.savetxt(f"batch_{batch_idx}_y_trues_decoded.txt", y_trues_decoded[0], fmt="%s")
+        #np.savetxt(f"batch_{batch_idx}_y_preds_decoded.txt", y_preds_decoded[0], fmt="%s")
 
-        loss = criterion(y_preds, y_trues)
+        loss = criterion(y_preds=y_preds, y_trues=y_trues)
 
         optimizer.zero_grad()
-        loss.backward()
+        loss.backward(retain_graph=False)
         optimizer.step()
         train_loss += loss.item()
 
@@ -118,7 +122,7 @@ def valid_one_epoch(
         # y_preds: (batch_size, 7 * 7 * 30) -> (batch_size, 1470)
         y_preds = model(inputs)
 
-        loss = criterion(y_preds, y_trues)
+        loss = criterion(y_preds=y_preds, y_trues=y_trues)
         valid_loss += loss.item()
 
         # update progress bar
@@ -152,6 +156,7 @@ def valid_one_epoch(
                     obj_threshold=0.4,
                     bbox_format="yolo",
                 )
+                print(y_pred_decoded_nms.shape)
                 class_ids = y_pred_decoded_nms[:, 0]
                 num_bboxes_after_nms = y_pred_decoded_nms.shape[0]
 

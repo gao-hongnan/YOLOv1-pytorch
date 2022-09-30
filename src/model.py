@@ -1,86 +1,40 @@
 """
-Implementation of Yolo (v1) architecture
-with slight modification with added BatchNorm.
-
-Information about architecture config:
-Tuple is structured by (kernel_size, filters, stride, padding)
-"M" is simply maxpooling with stride 2x2 and kernel 2x2
-List is structured by tuples and lastly int with number of repeats
+Implementation of Yolo (v1) architecture with slight modification with added BatchNorm.
 """
 
+
+from typing import List
+
 import torch
-from torch import nn
 import torchinfo
-from typing import List, Optional
-
-DEFAULT_ARCHITECTURE = [
-    (7, 64, 2, 3),
-    "M",
-    (3, 192, 1, 1),
-    "M",
-    (1, 128, 1, 0),
-    (3, 256, 1, 1),
-    (1, 256, 1, 0),
-    (3, 512, 1, 1),
-    "M",
-    [(1, 256, 1, 0), (3, 512, 1, 1), 4],
-    (1, 512, 1, 0),
-    (3, 1024, 1, 1),
-    "M",
-    [(1, 512, 1, 0), (3, 1024, 1, 1), 2],
-    (3, 1024, 1, 1),
-    (3, 1024, 2, 1),
-    (3, 1024, 1, 1),
-    (3, 1024, 1, 1),
-]
+from torch import nn
 
 
 class CNNBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, **kwargs):
+    """Creates CNNBlock similar to YOLOv1 Darknet architecture
+
+    Note:
+        1. On top of `nn.Conv2d` we add `nn.BatchNorm2d` and `nn.LeakyReLU`.
+        2. We set `track_running_stats=False` in `nn.BatchNorm2d` because we want
+           to avoid updating running mean and variance during training.
+           ref: https://tinyurl.com/ap22f8nf
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, **kwargs) -> None:
+        """Initialize CNNBlock.
+
+        Args:
+            in_channels (int): The number of input channels.
+            out_channels (int): The number of output channels.
+            **kwargs (Dict[Any]): Keyword arguments for `nn.Conv2d` such as `kernel_size`,
+                     `stride` and `padding`.
+        """
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
-        # https://tinyurl.com/ap22f8nf on set track_running_stats to False
         self.batchnorm = nn.BatchNorm2d(
-            out_channels, track_running_stats=False
+            num_features=out_channels, track_running_stats=False
         )
-        self.leakyrelu = nn.LeakyReLU(0.1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass."""
-        return self.leakyrelu(self.batchnorm(self.conv(x)))
-
-
-DEFAULT_ARCHITECTURE = [
-    (7, 64, 2, 3),
-    "M",
-    (3, 192, 1, 1),
-    "M",
-    (1, 128, 1, 0),
-    (3, 256, 1, 1),
-    (1, 256, 1, 0),
-    (3, 512, 1, 1),
-    "M",
-    [(1, 256, 1, 0), (3, 512, 1, 1), 4],
-    (1, 512, 1, 0),
-    (3, 1024, 1, 1),
-    "M",
-    [(1, 512, 1, 0), (3, 1024, 1, 1), 2],
-    (3, 1024, 1, 1),
-    (3, 1024, 2, 1),
-    (3, 1024, 1, 1),
-    (3, 1024, 1, 1),
-]
-
-
-class CNNBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, **kwargs):
-        super().__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
-        # https://tinyurl.com/ap22f8nf on set track_running_stats to False
-        self.batchnorm = nn.BatchNorm2d(
-            out_channels, track_running_stats=False
-        )
-        self.leakyrelu = nn.LeakyReLU(0.1)
+        self.leakyrelu = nn.LeakyReLU(negative_slope=0.1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass."""
@@ -90,32 +44,47 @@ class CNNBlock(nn.Module):
 class Yolov1Darknet(nn.Module):
     def __init__(
         self,
-        architecture: Optional[List] = None,
+        architecture: List,
         in_channels: int = 3,
-        grid_size: int = 7,
-        num_bboxes_per_grid: int = 2,
-        num_classes: int = 20,
+        S: int = 7,
+        B: int = 2,
+        C: int = 20,
         init_weights: bool = False,
-    ):
+    ) -> None:
+        """Initialize Yolov1Darknet.
+
+        Note:
+            1. `self.backbone` is the backbone of Darknet.
+            2. `self.head` is the head of Darknet.
+            3. Currently the head is hardcoded to have 1024 neurons and if you change
+               the image size from the default 448, then you will have to change the
+               neurons in the head.
+
+        Args:
+            architecture (List): The architecture of Darknet. See config.py for more details.
+            in_channels (int): The in_channels. Defaults to 3 as we expect RGB images.
+            S (int): Grid Size. Defaults to 7.
+            B (int): Number of Bounding Boxes to predict. Defaults to 2.
+            C (int): Number of Classes. Defaults to 20.
+            init_weights (bool): Whether to init weights. Defaults to False.
+        """
         super().__init__()
 
         self.architecture = architecture
         self.in_channels = in_channels
-        self.S = grid_size
-        self.B = num_bboxes_per_grid
-        self.C = num_classes
-
-        if self.architecture is None:
-            self.architecture = DEFAULT_ARCHITECTURE
+        self.S = S
+        self.B = B
+        self.C = C
 
         # backbone is darknet
-        self.backbone = self._create_conv_layers(self.architecture)
-        self.head = self._create_fcs(self.S, self.B, self.C)
+        self.backbone = self._create_darknet_backbone()
+        self.head = self._create_darknet_head()
 
         if init_weights:
             self._initialize_weights()
 
-    def _initialize_weights(self):
+    def _initialize_weights(self) -> None:
+        """Initialize weights for Conv2d, BatchNorm2d, and Linear layers."""
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(
@@ -130,104 +99,144 @@ class Yolov1Darknet(nn.Module):
                 nn.init.normal_(m.weight, 0, 0.01)
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass."""
         x = self.backbone(x)
-        return self.head(torch.flatten(x, start_dim=1))
+        x = self.head(torch.flatten(x, start_dim=1))
+        x = x.reshape(-1, self.S, self.S, self.C + self.B * 5)
+        # if self.squash_type == "flatten":
+        #     x = torch.flatten(x, start_dim=1)
+        # elif self.squash_type == "3D":
+        #     x = x.reshape(-1, self.S, self.S, self.C + self.B * 5)
+        # elif self.squash_type == "2D":
+        #     x = x.reshape(-1, self.S * self.S, self.C + self.B * 5)
+        return x
 
-    def _create_conv_layers(self, architecture):
+    def _create_darknet_backbone(self) -> nn.Sequential:
+        """Create Darknet backbone."""
         layers = []
         in_channels = self.in_channels
 
-        for x in architecture:
-            if isinstance(x, tuple):
+        for layer_config in self.architecture:
+            # convolutional layer
+            if isinstance(layer_config, tuple):
+                out_channels, kernel_size, stride, padding = layer_config
                 layers += [
                     CNNBlock(
                         in_channels,
-                        x[1],
-                        kernel_size=x[0],
-                        stride=x[2],
-                        padding=x[3],
+                        out_channels,
+                        kernel_size=kernel_size,
+                        stride=stride,
+                        padding=padding,
                     )
                 ]
-                in_channels = x[1]
+                # update next layer's in_channels to be current layer's out_channels
+                in_channels = layer_config[0]
 
             # max pooling
-            elif isinstance(x, str) and x == "M":
+            elif isinstance(layer_config, str) and layer_config == "M":
+                # hardcode maxpooling layer
                 layers += [nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))]
 
-            elif isinstance(x, list):
-                conv1 = x[0]
-                conv2 = x[1]
-                num_repeats = x[2]
+            elif isinstance(layer_config, list):
+                conv1 = layer_config[0]
+                conv2 = layer_config[1]
+                num_repeats = layer_config[2]
 
                 for _ in range(num_repeats):
                     layers += [
                         CNNBlock(
                             in_channels,
-                            conv1[1],
-                            kernel_size=conv1[0],
+                            out_channels=conv1[0],
+                            kernel_size=conv1[1],
                             stride=conv1[2],
                             padding=conv1[3],
                         )
                     ]
                     layers += [
                         CNNBlock(
-                            conv1[1],
-                            conv2[1],
-                            kernel_size=conv2[0],
+                            in_channels=conv1[0],
+                            out_channels=conv2[0],
+                            kernel_size=conv2[1],
                             stride=conv2[2],
                             padding=conv2[3],
                         )
                     ]
-                    in_channels = conv2[1]
+                    in_channels = conv2[0]
 
         return nn.Sequential(*layers)
 
-    @staticmethod
-    def _create_fcs(S: int, B: int, C: int) -> torch.nn.Sequential:
-        """Create the fully connected layers.
+    def _create_darknet_head(self) -> nn.Sequential:
+        """Create the fully connected layers of Darknet head.
 
         Note:
-        In original paper this should be
-            nn.Linear(1024*S*S, 4096),
-            nn.LeakyReLU(0.1),
-            nn.Linear(4096, S*S*(B*5+C))
+            1. In original paper this should be
+                nn.Sequential(
+                    nn.Linear(1024*S*S, 4096),
+                    nn.LeakyReLU(0.1),
+                    nn.Linear(4096, S*S*(B*5+C))
+                    )
+            2. You can add `nn.Sigmoid` to the last layer to stabilize training
+               and avoid exploding gradients with high loss since sigmoid will
+               force your values to be between 0 and 1. Remember if you do not put
+               this your predictions can be unbounded and contain negative numbers even.
         """
 
         return nn.Sequential(
             nn.Flatten(),
-            nn.Linear(1024 * S * S, 4096),
+            nn.Linear(1024 * self.S * self.S, 4096),
             nn.Dropout(0.0),
             nn.LeakyReLU(0.1),
-            nn.Linear(4096, S * S * (C + B * 5)),
-            # nn.Sigmoid(),  # This is not in the original implementation but added to avoid loss explosion - 增加sigmoid函数是为了将输出全部映射到(0,1)之间，因为如果出现负数或太大的数，后续计算loss会很麻烦
+            nn.Linear(4096, self.S * self.S * (self.C + self.B * 5)),
+            # nn.Sigmoid(),
         )
 
-
 if __name__ == "__main__":
-    # 自定义输入张量，验证网络可以正常跑通，并计算loss，调试用
-    batch_size = 16
+    batch_size = 4
     image_size = 448
     in_channels = 3
     S = 7
     B = 2
     C = 20
 
+    DARKNET_ARCHITECTURE = [
+        (64, 7, 2, 3),
+        "M",
+        (192, 3, 1, 1),
+        "M",
+        (128, 1, 1, 0),
+        (256, 3, 1, 1),
+        (256, 1, 1, 0),
+        (512, 3, 1, 1),
+        "M",
+        [(256, 1, 1, 0), (512, 3, 1, 1), 4],
+        (512, 1, 1, 0),
+        (1024, 3, 1, 1),
+        "M",
+        [(512, 1, 1, 0), (1024, 3, 1, 1), 2],
+        (1024, 3, 1, 1),
+        (1024, 3, 2, 1),
+        (1024, 3, 1, 1),
+        (1024, 3, 1, 1),
+    ]
+
     x = torch.zeros(batch_size, in_channels, image_size, image_size)
     y_trues = torch.zeros(batch_size, S, S, B * 5 + C)
+
     yolov1 = Yolov1Darknet(
+        architecture=DARKNET_ARCHITECTURE,
         in_channels=in_channels,
-        grid_size=S,
-        num_bboxes_per_grid=B,
-        num_classes=C,
+        S=S,
+        B=B,
+        C=C,
     )
+
     y_preds = yolov1(x)
-    assert (
-        y_preds.shape
-        == (batch_size, 7 * 7 * (20 + 2 * 5))
-        == (batch_size, S * S * (C + B * 5))
-    )
-    print(y_preds.shape)
+
+    print(f"x.shape: {x.shape}")
+    print(f"y_trues.shape: {y_trues.shape}")
+    print(f"y_preds.shape: {y_preds.shape}")
+    print(f"yolov1 last layer: {yolov1.head[-1]}")
 
     torchinfo.summary(
         yolov1, input_size=(batch_size, in_channels, image_size, image_size)

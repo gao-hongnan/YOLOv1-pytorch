@@ -1,28 +1,24 @@
 import torch
-import torchvision.transforms as transforms
-import torchvision.transforms.functional as FT
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from model import Yolov1Darknet
 from train import train_one_epoch, valid_one_epoch
 from dataset import VOCDataset, get_transform
-from utils import (
-    non_max_suppression,
-    mean_average_precision,
-    intersection_over_union,
-    seed_all,
-)
-from loss import YoloLoss
+from utils import seed_all
+from loss import YoloLoss, YOLOv1Loss, YOLOv1Loss2D
+from config import config
 
 DEBUG = True
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"  # "mps" # if macos m1
 print(f"Using {DEVICE}")
 
 # Hyperparameters etc.
-LEARNING_RATE = 2e-5
+LEARNING_RATE = 2e-5  # 5e-5 # 2e-5
 WEIGHT_DECAY = 0
 NUM_WORKERS = 0
 seed_all(seed=1992)
+
+ModelConfig = config.ModelConfig()
 
 
 def main(debug: bool = True):
@@ -35,13 +31,15 @@ def main(debug: bool = True):
 
     S, B, C = 7, 2, 20
     model = Yolov1Darknet(
-        in_channels=3, grid_size=7, num_bboxes_per_grid=2, num_classes=20
+        architecture=ModelConfig.architecture, in_channels=3, S=7, B=2, C=20
     ).to(DEVICE)
 
     optimizer = torch.optim.Adam(
         model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
-    loss_fn = YoloLoss(S, B, C)
+    # loss_fn = YoloLoss(S, B, C)
+    # loss_fn = YOLOv1Loss(S, B, C)
+    loss_fn = YOLOv1Loss2D(S, B, C)
 
     ### Load Data ###
     csv_file = "./datasets/pascal_voc_128/pascal_voc_128.csv"
@@ -82,9 +80,7 @@ def main(debug: bool = True):
         subset_indices[3] = 18
         subset_indices = subset_indices.tolist()
 
-        voc_dataset_debug = torch.utils.data.Subset(
-            voc_dataset_train, subset_indices
-        )
+        voc_dataset_debug = torch.utils.data.Subset(voc_dataset_train, subset_indices)
         voc_dataloader_debug = DataLoader(
             dataset=voc_dataset_debug,
             batch_size=BATCH_SIZE,

@@ -136,15 +136,11 @@ class VOCDataset(torch.utils.data.Dataset):
             image (torch.Tensor): Image tensor of shape (3, image_size, image_size).
             bboxes (torch.Tensor): Bounding boxes tensor of shape (S, S, 5 * B + C).
         """
-        image_path = os.path.join(
-            self.images_dir, self.df.loc[index, "image_id"]
-        )
+        image_path = os.path.join(self.images_dir, self.df.loc[index, "image_id"])
 
         image = Image.open(image_path).convert("RGB")
 
-        label_path = os.path.join(
-            self.labels_dir, self.df.loc[index, "label_id"]
-        )
+        label_path = os.path.join(self.labels_dir, self.df.loc[index, "label_id"])
 
         bboxes = self.strip_label_path(label_path)
 
@@ -211,22 +207,19 @@ def encode(bboxes: torch.Tensor, S: int, B: int, C: int) -> torch.Tensor:
         # 将第gridy行，gridx列的网格设置为负责当前ground truth的预测，置信度和对应类别概率均置为1
         # here we fill both bbox's objectness to be 1 if it is originally 0
         if (
-            label_matrix[y_grid, x_grid, 20] == 0
-            and label_matrix[y_grid, x_grid, 25] == 0
+            label_matrix[y_grid, x_grid, 4] == 0
+            and label_matrix[y_grid, x_grid, 9] == 0
         ):
-
-            label_matrix[y_grid, x_grid, 20] = 1
-            label_matrix[y_grid, x_grid, 25] = 1
-
+            # [conf, x_grid_offset, y_grid_offset, width, height]
             encoded_bbox_coordinates = torch.tensor(
-                [x_grid_offset, y_grid_offset, width, height]
+                [x_grid_offset, y_grid_offset, width, height, 1]
             )
 
-            label_matrix[y_grid, x_grid, 21:25] = encoded_bbox_coordinates
-            label_matrix[y_grid, x_grid, 26:30] = encoded_bbox_coordinates
+            label_matrix[y_grid, x_grid, 0:5] = encoded_bbox_coordinates
+            label_matrix[y_grid, x_grid, 5:10] = encoded_bbox_coordinates
 
-            # set class probability to 1
-            label_matrix[y_grid, x_grid, class_id] = 1
+            # set class probability to 1 at the class_id index shifted by 5 * B
+            label_matrix[y_grid, x_grid, 5 * B + class_id] = 1
 
     return label_matrix
 
@@ -248,8 +241,8 @@ def decode(outputs: torch.Tensor, S: int = 7) -> torch.Tensor:
     outputs = outputs.reshape(batch_size, 7, 7, 30)
 
     # bbox_1: [bs, 7, 7, 4] where 4 is [x_grid_offset, y_grid_offset, width, height]
-    bbox_1 = outputs[..., 21:25]
-    bbox_2 = outputs[..., 26:30]
+    bbox_1 = outputs[..., 0:4]
+    bbox_2 = outputs[..., 5:9]
 
     # obj_scores: [2, bs, 7, 7] the bbox objectness confidence scores
     # logic: assume S=7, B=2, C=20, then a total of 98 bboxes are predicted
@@ -257,7 +250,7 @@ def decode(outputs: torch.Tensor, S: int = 7) -> torch.Tensor:
     # the first box and the second element is the scores for the second box.
     # key: flatten this along the bs dim results in [2 * 49] = 98
     obj_scores = torch.cat(
-        (outputs[..., 20].unsqueeze(0), outputs[..., 25].unsqueeze(0)),
+        (outputs[..., 4].unsqueeze(0), outputs[..., 9].unsqueeze(0)),
         dim=0,
     )
 
@@ -283,8 +276,10 @@ def decode(outputs: torch.Tensor, S: int = 7) -> torch.Tensor:
     # same for y_grid_offset
     # key: the logic is clearer now why he wanted to unsqueeze cell_indices to have
     # an additional dimension, this is for the broadcasting to work (add).
-    x_grid_offset = best_bbox[..., :1]
-    y_grid_offset = best_bbox[..., 1:2]
+    x_grid_offset = best_bbox[
+        ..., 0:1
+    ]  # best_bbox[..., :1] changed cause of encode changed
+    y_grid_offset = best_bbox[..., 1:2]  # best_bbox[..., 1:2]
 
     # x_center: [bs, 7, 7, 1] | y_center: [bs, 7, 7, 1]
     # logic: we recovered the x_center and y_center from the original yolo format.
@@ -301,20 +296,16 @@ def decode(outputs: torch.Tensor, S: int = 7) -> torch.Tensor:
 
     # FIXME: should here not be the class_id of the best bbox?
     # class_id: [bs, 7, 7, 1]
-    class_id = outputs[..., :20].argmax(-1).unsqueeze(-1)
+    class_id = outputs[..., 10:].argmax(-1).unsqueeze(-1)
 
     # FIXME: should here not be the best_confidence of the best bbox?
     # best_confidence: [bs, 7, 7, 1]
-    best_confidence = torch.max(outputs[..., 20], outputs[..., 25]).unsqueeze(
-        -1
-    )
+    best_confidence = torch.max(outputs[..., 4], outputs[..., 9]).unsqueeze(-1)
 
     # detected_bboxes: [bs, 7, 7, 6]
     # logic: the 6 dimensions are [class_id, best_confidence, x_center, y_center, width, height]
 
-    decoded_bbox = torch.cat(
-        (class_id, best_confidence, converted_bboxes), dim=-1
-    )
+    decoded_bbox = torch.cat((class_id, best_confidence, converted_bboxes), dim=-1)
 
     # logic: the final form here assumes that we have only 1 bbox per cell, hence [bs, 49, 6]
     flattened_decoded_bbox = flatten_decoded_bbox(decoded_bbox, S)
@@ -333,9 +324,7 @@ def flatten_decoded_bbox(decoded_bbox: torch.Tensor, S: int) -> torch.Tensor:
     """
 
     # flattened_decoded_bbox: [bs, 7 * 7, 6] = [bs, 49, 6]
-    flattened_decoded_bbox = decoded_bbox.reshape(
-        decoded_bbox.shape[0], S * S, -1
-    )
+    flattened_decoded_bbox = decoded_bbox.reshape(decoded_bbox.shape[0], S * S, -1)
     # turn class_id to int
     flattened_decoded_bbox[..., 0] = flattened_decoded_bbox[..., 0].long()
 
@@ -404,9 +393,7 @@ if __name__ == "__main__":
     for image, bboxes in voc_dataset_train:
         # print(bboxes)
         print(f"type of image: {type(image)}, type of bboxes: {type(bboxes)}")
-        print(
-            f"shape of image: {image.shape}, shape of bboxes: {bboxes.shape}"
-        )
+        print(f"shape of image: {image.shape}, shape of bboxes: {bboxes.shape}")
         print(f"bboxes: {bboxes}")
 
         break
@@ -443,9 +430,9 @@ if __name__ == "__main__":
 
         image_grid = []
         for image, voc_bbox in zip(images, voc_bboxes):
-            image = torch.from_numpy(
-                np.asarray(FT.to_pil_image(image))
-            ).permute(2, 0, 1)
+            image = torch.from_numpy(np.asarray(FT.to_pil_image(image))).permute(
+                2, 0, 1
+            )
             overlayed_image = torchvision.utils.draw_bounding_boxes(
                 image,
                 voc_bbox,

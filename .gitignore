@@ -5,6 +5,7 @@ site/
 \#*\#
 venv_*/
 **/.ipynb_checkpoints/
+batch_*.txt
 
 src/__pycache__/*
 

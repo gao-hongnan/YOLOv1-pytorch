@@ -56,7 +56,25 @@ $$
 
 # YOLOv1
 
-
+YOLO (You Only Look Once) is a single-stage object detector that frames object detection as a single
+regression problem to predict bounding box coordinates and class probabilities of objects in an image.
+The model is called YOLO because you only look once at an image to predict what objects are present 
+and where they are in the image. 
+There are several versions of YOLO models, with each one having a slightly different architecture 
+from the others. In this article, we will focus on the very first model called YOLOv1. 
+ 
+YOLOv1 comprises of a single convolutional neural network that simultaneously predicts 
+multiple bounding boxes and class probabilities for these boxes. 
+Compared to other traditional methods of object detection such as DPM and R-CNN,
+the YOLO model has several benefits such as being extremely fast,
+being able to reason globally about an image when making predictions and being able to learn
+generalizable representations of objects in an iamge. 
+ 
+The YOLOv1 model uses an anchor-free architecture with parameterised bounding boxes. 
+It takes in an RGB image (448×448×3) as its input and returns a tensor (7×7×30) as its output.
+The parameterisation of bounding boxes means that the the bounding box coordinates are defined 
+relative to a particular grid in the 7×7 grid space (rather than being defined on an absolute scale).
+More information on the model architecture will be detailed in the Model Architecture section below.
 
 ## Notations and Definitions
 
@@ -69,6 +87,7 @@ name: yolov1-sample-image
 Sample Image with Grids.
 ```
 
+(yolov1.md#bounding-box-parametrization)=
 ### Bounding Box Parametrization
 
 Given a yolo format bounding box, we will perform parametrization to transform the 
@@ -620,7 +639,31 @@ Convert 3D tensor to 2D matrix
 
 ## Construction of Ground Truth Matrix
 
-Denote the subscript $i$ in the following convention to mean the $i$-th grid cell where
+````{admonition} Abuse of Notation
+When I say grid cell $i$, it also means the $i$-th row of the ground truth and prediction matrix.
+````
+
+The below shows an image alongside its bounding boxes, in YOLO format as per {prf:ref}`yolo-bbox`.
+
+```{figure} ./assets/image_1_and_bbox_and_labels.jpg
+---
+name: image_1_and_label
+---
+Image 1 and its yolo format label.
+```
+
+Here we see this image has 2 bounding boxes, and each bounding box has 5 values, which corresponds
+to the 5 values in the YOLO format. 
+
+Our goal here is to convert the YOLO style labels into a $49 \times 30$ matrix
+(equivalent to a 3D tensor of shape $7 \times 7 \times 30$.
+
+Recall that in section [bounding box parametrization](yolov1.md#bounding-box-parametrization), we
+mentioned that YOLOv1 predicts the offset for its bounding box center, and the square root 
+of width and height. And recall that the ground truth bounding box's center determines
+which grid cell it belongs to, this is particularly important to remember.
+
+More formally, we denote the subscript $i$ to be the $i$-th grid cell where
 $i \in \{1, 2, \ldots 49\}$ as seen in figure {numref}`2dto3d`.
 
 We will assume $S=7$, $B=2$, and $C=20$, where
@@ -629,7 +672,21 @@ We will assume $S=7$, $B=2$, and $C=20$, where
 - $B$ is the number of bounding boxes to be predicted;
 - $C$ is the number of classes.
 
+We will also assume that our batch size is $1$, and hence we are only looking
+at one single image. This simplifies the explanation. Just note that if we have
+a batch size of $N$, then we will have $N$ ground truth matrices.
+
 Consequently, each row of the ground truth matrix will have $2B + C = 30$ elements.
+
+Remember that each row $i$ of the ground truth matrix corresponds to the grid cell $i$.
+
+```{figure} ./assets/3d_to_2d_map_1.jpg
+---
+name: 3d_to_2d_map_1
+---
+Convert 3D tensor to 2D matrix.
+```
+
 
 ````{prf:definition} YOLOv1 Ground Truth Matrix
 :label: yolo_gt_matrix
@@ -705,15 +762,19 @@ Lastly, the idea of having 2 bounding boxes in the encoding construction will be
 
 ## Construction of Prediction Matrix
 
+````{admonition} Abuse of Notation
+When I say grid cell $i$, it also means the $i$-th row of the ground truth and prediction matrix.
+````
+
 The construction of the prediction matrix $\hat{\y}$ follows the last layer of the neural network,
 shown earlier in diagram {ref}`yolov1-model`.
 
 To stay consistent with the shape defined in {prf:ref}`yolo_gt_matrix`, we will reshape
-the last layer from $7 \times 7 \times 30$ to $49 \times 30$. As mentioned in [head section](yolov1.md#head)
-the last layer is not really a 3d-tensor by design, it was in fact a linear/dense layer of shape $[-1, 1470]$.
+the last layer from $7 \times 7 \times 30$ to $49 \times 30$. As mentioned in the section on 
+[model's head](yolov1.md#head) the last layer is not really a 3d-tensor, 
+it is in fact a linear/dense layer of shape $[-1, 1470]$.
 The $1470$ neurons were reshaped to be $7 \times 7 \times 30$ so that readers like us can
 interpret it better with the injection of grid cell idea.
-
 
 ````{prf:definition} YOLOv1 Prediction Matrix
 :label: yolo_pred_matrix

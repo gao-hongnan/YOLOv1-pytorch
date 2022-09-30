@@ -22,6 +22,7 @@ from typing import List
 import torchvision.transforms.functional as FT
 import numpy as np
 from torch.utils.data import DataLoader
+from utils import bmatrix
 
 # FIXME: see the mzbai's repo to collate fn properly so can use albu!
 def get_transform(mode: str, image_size: int = 448) -> T.Compose:
@@ -221,10 +222,12 @@ def encode(bboxes: torch.Tensor, S: int, B: int, C: int) -> torch.Tensor:
             # set class probability to 1 at the class_id index shifted by 5 * B
             label_matrix[y_grid, x_grid, 5 * B + class_id] = 1
 
+    # (7, 7, 30) -> (49, 30)
+    label_matrix = label_matrix.reshape(-1, S * S, 5 * B + C)
     return label_matrix
 
 
-def decode(outputs: torch.Tensor, S: int = 7) -> torch.Tensor:
+def decode(outputs: torch.Tensor, S: int = 7, B: int = 2, C: int = 20) -> torch.Tensor:
     """
     Converts bounding boxes output from Yolo with
     an image split size of S into entire image ratios
@@ -238,7 +241,7 @@ def decode(outputs: torch.Tensor, S: int = 7) -> torch.Tensor:
 
     # outputs: either [bs, 7, 7, 30] or [bs, 1470] where 1470 = 7 * 7 * 30 flattened
     outputs = outputs.detach().cpu()
-    outputs = outputs.reshape(batch_size, 7, 7, 30)
+    outputs = outputs.reshape(batch_size, S, S, 5 * B + C)
 
     # bbox_1: [bs, 7, 7, 4] where 4 is [x_grid_offset, y_grid_offset, width, height]
     bbox_1 = outputs[..., 0:4]
@@ -375,22 +378,52 @@ def flatten_decoded_bbox(decoded_bbox: torch.Tensor, S: int) -> torch.Tensor:
 
 #     return torch.stack(bboxes)
 
-if __name__ == "__main__":
+
+def get_debug_dataset():
     csv_file = "./datasets/pascal_voc_128/pascal_voc_128.csv"
     images_dir = "./datasets/pascal_voc_128/images"
     labels_dir = "./datasets/pascal_voc_128/labels"
 
     S, B, C = 7, 2, 20
-    mode = "train"
-    train_transforms = get_transform(mode=mode)
 
-    voc_dataset_train = VOCDataset(
-        csv_file, images_dir, labels_dir, train_transforms, S, B, C, mode
+    ### Transforms ###
+    no_transforms = get_transform(mode="valid")
+
+    voc_dataset_train_no_transforms = VOCDataset(
+        csv_file,
+        images_dir,
+        labels_dir,
+        no_transforms,
+        S,
+        B,
+        C,
+        mode="train",
     )
 
-    print(f"Length of the dataset: {len(voc_dataset_train)}")
+    # remember to convert to list as __getitem__ takes in index as type int
+    subset_indices = torch.arange(32)
+    # purposely pick easy images for the 1st batch to illustrate for audience
+    subset_indices[1] = 10
+    subset_indices[2] = 12
+    subset_indices[3] = 18
+    subset_indices = subset_indices.tolist()
 
-    for image, bboxes in voc_dataset_train:
+    voc_dataset_debug = torch.utils.data.Subset(
+        voc_dataset_train_no_transforms, subset_indices
+    )
+    return voc_dataset_debug
+
+
+if __name__ == "__main__":
+    image_1_yolo_label = VOCDataset.strip_label_path(
+        "./datasets/pascal_voc_128/labels/000001.txt"
+    )
+    print(bmatrix(image_1_yolo_label))
+    voc_dataset_debug = get_debug_dataset()
+
+    print(f"Length of the dataset: {len(voc_dataset_debug)}")
+
+    for image, bboxes in voc_dataset_debug:
         # print(bboxes)
         print(f"type of image: {type(image)}, type of bboxes: {type(bboxes)}")
         print(f"shape of image: {image.shape}, shape of bboxes: {bboxes.shape}")
@@ -398,22 +431,16 @@ if __name__ == "__main__":
 
         break
 
-    BATCH_SIZE = 4
-    NUM_WORKERS = 0
-    PIN_MEMORY = True
-    SHUFFLE = False
-    DROP_LAST = True
-
-    train_loader = DataLoader(
-        dataset=voc_dataset_train,
-        batch_size=BATCH_SIZE,
-        num_workers=NUM_WORKERS,
-        pin_memory=PIN_MEMORY,
-        shuffle=SHUFFLE,
-        drop_last=DROP_LAST,
+    voc_dataloader_debug = DataLoader(
+        dataset=voc_dataset_debug,
+        batch_size=4,
+        num_workers=0,
+        pin_memory=True,
+        shuffle=False,
+        drop_last=True,
     )
 
-    for batch_index, (images, bboxes) in enumerate(train_loader):
+    for batch_index, (images, bboxes) in enumerate(voc_dataloader_debug):
 
         images = images.detach().cpu()
         bboxes = bboxes.detach().cpu()

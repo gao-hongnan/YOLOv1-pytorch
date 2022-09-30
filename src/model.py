@@ -67,6 +67,9 @@ class Yolov1Darknet(nn.Module):
             B (int): Number of Bounding Boxes to predict. Defaults to 2.
             C (int): Number of Classes. Defaults to 20.
             init_weights (bool): Whether to init weights. Defaults to False.
+
+        Reference:
+            Aladdin's repo: https://github.com/aladdinpersson/Machine-Learning-Collection
         """
         super().__init__()
 
@@ -190,6 +193,7 @@ class Yolov1Darknet(nn.Module):
             nn.Linear(4096, self.S * self.S * (self.C + self.B * 5)),
             # nn.Sigmoid(),
         )
+
 
 if __name__ == "__main__":
     batch_size = 4

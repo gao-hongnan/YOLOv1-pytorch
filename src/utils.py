@@ -33,13 +33,15 @@ def bmatrix(a):
     :a: numpy array
     :returns: LaTeX bmatrix as a string
     """
+    if isinstance(a, list):
+        a = np.asarray(a)
     if len(a.shape) > 2:
         raise ValueError("bmatrix can at most display two dimensions")
     lines = (
         np.array2string(
             a,
             max_line_width=np.infty,
-            formatter={"float_kind": lambda x: "{:.2e}".format(x)},
+            # formatter={"float_kind": lambda x: "{:.2e}".format(x)},
         )
         .replace("[", "")
         .replace("]", "")

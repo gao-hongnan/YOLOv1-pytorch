@@ -669,6 +669,7 @@ class YOLOv1Loss2D(nn.Module):
             y_pred = y_preds[batch_index]  # (49, 30)
             # print(bmatrix(y_true.cpu().detach().numpy()))
             # print(bmatrix(y_pred.cpu().detach().numpy()))
+            
             # print(f"y_true {y_true}")
 
             # i is the grid cell index in my notes ranging from 0 to 48

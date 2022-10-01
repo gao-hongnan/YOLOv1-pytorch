@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from utils import intersection_over_union, bmatrix
 import numpy as np
-
+import pandas as pd
 # reshape to [49, 30] from [7, 7, 30]
 class YOLOv1Loss2D(nn.Module):
     # assumptions
@@ -84,8 +84,15 @@ class YOLOv1Loss2D(nn.Module):
             # this is the gt and pred matrix in my notes: y and yhat
             y_true = y_trues[batch_index]  # (49, 30)
             y_pred = y_preds[batch_index]  # (49, 30)
+            
             # print(bmatrix(y_true.cpu().detach().numpy()))
             # print(bmatrix(y_pred.cpu().detach().numpy()))
+            y_true_col_names = ["x", "y", "w", "h", "conf", "x", "y", "w", "h", "conf", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10", "p11", "p12", "p13", "p14", "p15", "p16", "p17", "p18", "p19", "p20"]
+            y_pred_col_names = ["xhat^1", "yhat^1", "what^1", "hhat^1", "confhat^1", "xhat^2", "yhat^2", "what^2", "hhat^2", "confhat^2", "p1hat", "p2hat", "p3hat", "p4hat", "p5hat", "p6hat", "p7hat", "p8hat", "p9hat", "p10hat", "p11hat", "p12hat", "p13hat", "p14hat", "p15hat", "p16hat", "p17hat", "p18hat", "p19hat", "p20hat"]
+            y_true_df = pd.DataFrame(data=y_true.cpu().detach().numpy(), index =[i for i in range(self.S * self.S)], columns = y_true_col_names)
+            y_true_df.to_csv("y_true.csv")
+            
+            print(y_true_df.head())
             # print(f"y_true {y_true}")
 
             # i is the grid cell index in my notes ranging from 0 to 48

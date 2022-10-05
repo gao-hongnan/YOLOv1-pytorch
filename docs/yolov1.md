@@ -28,6 +28,7 @@ $$
 \newcommand{\iou}{\textbf{IOU}_{\symbf{\hat{b}}}^{\symbf{b}}}
 \newcommand{\conf}{\textbf{conf}}
 \newcommand{\confhat}{\hat{\textbf{conf}}}
+\newcommand{\X}{\symbf{X}}
 \newcommand{\xx}{\mathrm{x}}
 \newcommand{\yy}{\mathrm{y}}
 \newcommand{\ww}{\mathrm{w}}
@@ -56,13 +57,15 @@ $$
 
 # YOLOv1
 
+{cite}`1506026487:online`
+
 YOLO (You Only Look Once) is a single-stage object detector that frames object detection as a single
 regression problem to predict bounding box coordinates and class probabilities of objects in an image.
 The model is called YOLO because you only look once at an image to predict what objects are present 
 and where they are in the image. 
 There are several versions of YOLO models, with each one having a slightly different architecture 
 from the others. In this article, we will focus on the very first model called YOLOv1. 
- 
+
 YOLOv1 comprises of a single convolutional neural network that simultaneously predicts 
 multiple bounding boxes and class probabilities for these boxes. 
 Compared to other traditional methods of object detection such as DPM and R-CNN,
@@ -76,226 +79,24 @@ The parameterisation of bounding boxes means that the the bounding box coordinat
 relative to a particular grid in the 7×7 grid space (rather than being defined on an absolute scale).
 More information on the model architecture will be detailed in the Model Architecture section below.
 
-## Notations and Definitions
+## Unified Detection {cite}`1506026487:online`
 
-### Sample Image
+YOLOv1 is a unified detection model that simultaneously predicts multiple bounding boxes and class.
 
-```{figure} https://storage.googleapis.com/reighns/images/grid_on_image.PNG
----
-name: yolov1-sample-image
----
-Sample Image with Grids.
-```
+What this means is that given an input image $\X$ of size $448\times 448\times 3$, the model network
+can accurately ***locate*** and ***classify*** multiple objects in the image with just one forward pass.
 
-(yolov1.md#bounding-box-parametrization)=
-### Bounding Box Parametrization
+This is in contrast to other object detection models such as R-CNN which require multiple forward passes
+since they use a two-stage pipeline. 
 
-Given a yolo format bounding box, we will perform parametrization to transform the 
-coordinates of the bounding box to a more convenient form. Before that, let us
-define some notations.
+What is so smart about this architecture is that the author managed to design a network such that it can
+reason globally about the image when making predictions. More concretely, the model's feature map is
+so powerful such that it can do both regression and classification at the same time. Regression being
+the task of predicting bounding box coordinates and classification being the task of predicting class.
+Although in the first version of YOLO, the model is treated as regression globally, but in later versions
+of YOLO, the model is revised such that the loss function is a combination of regression and classification.
 
-````{prf:definition} YOLO Format Bounding Box
-:label: yolo-bbox
-
-The YOLO format bounding box is a 4-tuple vector consisting of the coordinates of
-the bounding box in the following order:
-
-$$
-\byolo = \begin{bmatrix} \xx_c & \yy_c & \ww_n & \hh_n \end{bmatrix} \in \R^{1 \times 4}
-$$ (yolo-bbox)
-
-where 
-
-- $\xx_c$ and $\yy_c$ are the coordinates of the center of the bounding box, 
-  normalized with respect to the image width and height;
-- $\ww_n$ and $\hh_n$ are the width and height of the bounding box,
-  normalized with respect to the image width and height.
-
-Consequently, all coordinates are in the range $[0, 1]$.
-````
-
-We could be done at this step and ask the model to predict the bounding box in
-YOLO format. However, the author proposes a more convenient parametrization for 
-the model to learn better:
-
-1. The center of the bounding box is parametrized as the offset from the top-left
-   corner of the grid cell to the center of the bounding box. We will go through an 
-   an example later.
-
-2. The width and height of the bounding box are parametrized to the square root
-   of the width and height of the bounding box. 
-   
-````{admonition} Intuition: Parametrization of Bounding Box
-The loss function of YOLOv1 is using mean squared errror.
-
-The square root is present so that errors in small bounding boxes are more penalizing
-than errors in big bounding boxes.
-Recall that square root mapping expands the range of small values for values between
-$0$ and $1$.
-
-For example, if the normalized width and height of a bounding box is $[0.05, 0.8]$ respectively,
-it means that the bounding box's width is 5% of the image width and height is 80% of the image height.
-We can scale it back since absolute numbers are easier to visualize.
-
-Given an image of size $100 \times 100$, the bounding box's width and height unnormalized are $5$ and $80$ respectively.
-Then let's say the model predicts the bounding box's width and height to be $[0.2, 0.95]$.
-The mean squared error is $(0.2 - 0.05)^2 + (0.95 - 0.8)^2 = 0.0225 + 0.0225 = 0.045$. We see that
-both errors are penalized equally. But if you scale the predicted bounding box's width and height back
-to the original image size, you will get $20$ and $95$ respectively, then the relative error is
-much worse for the width than the height (i.e both deviates 15 pixels but the width deviates much more 
-percentage wise).
-
-Consequently, the square root mapping is used to penalize errors in small bounding boxes more than
-the errors in big bounding boxes. If we use square root mapping, our original width and height
-becomes $[0.22, 0.89]$ and the predicted width and height becomes $[0.45, 0.97]$. The mean squared error
-is then $(0.45 - 0.22)^2 + (0.97 - 0.89)^2 = 0.0529 + 0.0064 = 0.0593$. We see that the error in the
-width is penalized more than the error in the height. This helps the model to learn better by 
-assigning more importance to small bounding boxes errors.
-````
-
-````{prf:definition} Parametrized Bounding Box
-:label: param-bbox
-
-The parametrized bounding box is a 4-tuple vector consisting of the coordinates of
-bounding box in the following order:
-
-$$
-\b = \begin{bmatrix} f(\xx_c, \gx) & f(\yy_c, \gy) & \sqrt{\ww_n} & \sqrt{\hh_n} \end{bmatrix} \in \R^{1 \times 4}
-$$ (param-bbox)
-
-where 
-
-- $\gx = \lfloor S \cdot \xx_c \rfloor$ is the grid cell column (row) index;
-- $\gy = \lfloor S \cdot \yy_c \rfloor$ is the grid cell row (column) index;
-- $f(\xx_c, \gx) = S \cdot \xx_c - \gx$ and;
-- $f(\yy_c, \gy) = S \cdot \yy_c - \gy$
-
-Take note that during construction, the square root is omitted because it is included
-in the loss function later. You will see in our code later that our $\b$ is actually
-
-$$
-\begin{align}
-\b &= \begin{bmatrix} f(\xx_c, \gx) & f(\yy_c, \gy) & \ww_n & \hh_n \end{bmatrix} \\
-   &= \begin{bmatrix} \xx & \yy & \ww & \hh \end{bmatrix}
-\end{align}
-$$
-
-We will be using the notation $[\xx, \yy, \ww, \hh]$ in the rest of the sections.
-
-As a side note, it is often the case that a single image has multiple bounding boxes. Therefore, 
-you will need to convert all of them to the parametrized form. 
-````
-
-````{prf:example} Example of Parametrization
-:label: param-bbox-example
-
-Consider the **TODO insert image** image. The bounding box is in the YOLO format at first.
-
-$$
-\byolo = \begin{bmatrix} 11 & 0.3442 & 0.611 & 0.4164 & 0.262
-         \end{bmatrix}   
-$$
-
-Then since $S = 7$, we can recover $f(\xx_c, \gx)$ and $f(\yy_c, \gy)$ as follows:
-
-$$
-\begin{aligned}
-\gx &= \lfloor 7 \cdot 0.3442  \rfloor &= 2 \\
-\gy &= \lfloor 7 \cdot 0.611   \rfloor &= 4 \\
-f(\xx_c, \gx) &= 7 \cdot 0.3442 - 2 &= 0.4093 \\
-f(\yy_c, \gy) &= 7 \cdot 0.611  - 4 &= 0.2770 \\
-\end{aligned}
-$$
-
-Visually, the bounding box of the dog actually lies in the 3rd column and 5th row $(3, 5)$ of the grid.
-But we compute it as if it lies in the 2nd column and 4th row $(2, 4)$ of the grid because in python
-the index starts from 0 and the top-left corner of the image is considered grid cell $(0, 0)$.
-
-Then the parametrized bounding box is:
-
-$$
-\b = \begin{bmatrix} 0.4093 & 0.2770 & \sqrt{0.4164} & \sqrt{0.262} \end{bmatrix} \in \R^{1 \times 4}
-$$
-````
-
-For more details, have a read at [this article](https://www.harrysprojects.com/articles/fastrcnn.html)
-to understand the parametrization.
-
-### Loss Function
-
-See below section.
-
-### Other Important Notations
-
-````{prf:definition} S, B and C
-:label: s-b-c
-
-
-- $S$: We divide an image into an $S \times S$ grid, so $S$ is the **grid size**;
-- $\gx$ denotes $x$-coordinate grid cell and $\gy$ denotes the $y$-coordinate grid cell and so the first grid cell can be denoted $(\gx, \gy) = (0, 0)$ or $(1, 1)$ if using python;
-- $B$: In each grid cell $(\gx, \gy)$, we can predict $B$ number of bounding boxes;
-- $C$: This is the number of classes;
-- Let $\cc \in \{1, 2, \ldots, 20\}$ be a **scalar**, which is the class index (id) where
-    - 20 is the number of classes;
-    - in Pascal VOC: `[aeroplane, bicycle, bird, boat, bottle, bus, car, cat, chair, cow, diningtable, dog, horse, motorbike, person, pottedplant, sheep, sofa, train, tvmonitor]`
-    - So if the object is class bicycle, then $\cc = 2$;
-    - Note in python notation, $\cc$ starts from $0$ and ends at $19$ so need to shift accordingly.
-````
-
-````{prf:definition} Probability Object
-:label: prob-object
-
-The author defines $\Pobj$ to be the probability that an object is present in a grid cell.
-This is constructed **deterministically** to be either $0$ or $1$. 
-
-To make the notation more compact, we will add a subscript $i$ to denote the grid cell.
-
-$$
-\Pobj_i = 
-\begin{cases}
-    1     & \textbf{if grid cell } i \textbf{ has an object}\\
-    0     & \textbf{otherwise}
-\end{cases}
-$$
-
-By definition, if a ground truth bounding box's center coordinates $(\xx_c, \yy_c)$
-falls in grid cell $i$, then $\Pobj_i = 1$ for that grid cell.
-````
-
-
-````{prf:definition} Ground Truth Confidence Score
-:label: gt-confidence
-
-The author defines the confidence score of the ground truth matrix 
-to be 
-
-$$
-\conf_i = \Pobj_i \times \iou
-$$
-
-where 
-
-$$\iou = \underset{\bhat_i \in \{\bhat_i^1, \bhat_i^2\}}{\max}\textbf{IOU}(\b_i, \bhat_i)$$
-
-where $\bhat_i^1$ and $\bhat_i^2$ are the two bounding boxes that are predicted by the model.
-
-It is worth noting to the readers that $\conf_i$ is also an indicator function, since
-$\Pobj_i$ from {prf:ref}`prob-object` is an indicator function. 
-
-More concretely,
-
-$$
-\conf_i =
-\begin{cases}
-    \textbf{IOU}(\b_i, \bhat_i)     & \textbf{if grid cell } i \textbf{ has an object}\\
-    0                               & \textbf{otherwise}
-\end{cases}
-$$
-
-since $\Pobj_i = 1$ if the grid cell has an object and $\Pobj_i = 0$ otherwise.
-
-Therefore, the author is using the IOU as a proxy for the confidence score in the ground truth matrix. 
-````
+Before we dive into more details, we define the model architecture first.
 
 ## Model Architecture
 
@@ -311,7 +112,7 @@ YoloV1 Model Architecture
 ```
 
 The below figure is a zoomed in version of the last layer, a cuboid of shape $7 \times 7 \times 30$.
-
+This cuboid is extremely important to understand, which we will mention more later.
 
 ```{figure} https://storage.googleapis.com/reighns/images/label_matrix.png
 ---
@@ -319,6 +120,8 @@ name: label-matrix
 ---
 The output tensor from YOLOv1's last layer.
 ```
+
+### Python Implementation
 
 In our implementation, there are some small changes such as adding 
 [**batch norm**](https://pytorch.org/docs/stable/generated/torch.nn.BatchNorm2d.html) layers.
@@ -566,8 +369,9 @@ print(f"y_trues.shape: {y_trues.shape}")
 print(f"y_preds.shape: {y_preds.shape}")
 ```
 
-Notice how the input label `y_trues` and `y_preds` are of shape `(batch_size, S, S, B * 5 + C)`, 
-in our case is `(16, 7, 7, 30)`. We will talk more in section [head](yolov1.md#head) below.
+The input label `y_trues` and `y_preds` are of shape `(batch_size, S, S, B * 5 + C)`, 
+in our case is `(4, 7, 7, 30)` and indeed the shape that we expected in {numref}`label-matrix`.
+We will talk more in section on [head](yolov1.md#head) below.
 
 (yolov1.md#model-summary)=
 ### Model Summary
@@ -595,7 +399,12 @@ of the input of the YOLO head. We often overcome the shape mismatch issue with
 (yolov1.md#head)=
 ### Head
 
-We print out the last layer of the YOLOv1 model:
+Head is the part of the model that takes the output of the backbone and
+transforms it into the output of the model. In this case, we need to transform
+whatever shape we get from the backbone into the shape of the label matrix, which is
+`(7, 7, 30)`.
+
+Let's print out the last layer(s) of the YOLOv1 model:
 
 ```{code-cell} ipython3
 :tags: [hide-output]
@@ -606,15 +415,19 @@ print(f"yolov1 last layer: {yolov1.head[-1]}")
 Unfortunately, the info is not very helpful. We will refer back to the model summary
 in section [model summary](yolov1.md#model-summary) to understand the output shape of the last layer.
 
-Notice that the last layer is actually a linear (fc) layer with shape `[16, 1470]`. This is in
-contrast of the output shape of `y_preds` which is `[16, 7, 7, 30]`. This is because in the
-`forward` method, we reshaped the output of the last layer to be `[16, 7, 7, 30]`.
+Notice that the last layer is actually a linear (fc) layer with shape `[4, 1470]`. This is in
+contrast of the output shape of `y_preds` which is `[4, 7, 7, 30]`. This is because in the
+`forward` method, we reshaped the output of the last layer to be `[4, 7, 7, 30]`.
+
+````{admonition} Why do we need to reshape the output of the last layer?
+:class: important
 
 The reason of the reshape is because of better interpretation.
 More concretely, the paper said that the core idea is to divide the input image into an $S \times S$
 grid, where each grid cell has a shape of $5B + C$. See {numref}`label-matrix` for a visual example.
+````
 
-````{admonition} 2D matrix  vs 3D tensor
+````{admonition} 2D matrix vs 3D tensor
 If we remove the batch size dimension, then the output tensor of `y_trues` and `y_preds` will be
 a 3D tensor of shape `(S, S, B * 5 + C) = (7, 7, 30)`. 
 
@@ -625,17 +438,349 @@ easier interpretation, as a 2D matrix is easier to visualize than a 3D tensor.
 We will carry this idea forward in the next section.
 ````
 
+## Anchors and Prior Boxes
+
+Before we move on, it is beneficial to read on what
+[anchors and prior boxes are](https://www.harrysprojects.com/articles/fasterrcnn.html).
+This will give you a better idea on why the author divide the input image into an $S \times S$ grid.
+
+## Bounding Box Parametrization
+
+Before we move on, it is beneficial to read on what
+[bounding box parametrization is](https://www.harrysprojects.com/articles/fastrcnn.html).
+This will give you a better idea on why the author wants to transform the bounding box
+into offsets pertaining to the grid cell.
+
+## YOLOv1 Encoding Setup
+
+As a continuation of the previous section on [head](yolov1.md#head), we will now answer the question
+on why we reshape the output of the last layer to be `[7, 7, 30]`.
+
+The definitions of some keywords are defined in section on 
+[definitions](yolov1.md#other-important-notations).
+
+Quoting from the paper:
+
+> Our system divides the input image into an S × S grid.
+If the center of an object falls into a grid cell, that grid cell
+is responsible for detecting that object. {cite}`1506026487:online`
+
+Let's visualize this idea with the help of the diagram below.
+
+```{figure} ./assets/yolov1_image_grids.jpg
+---
+name: image_1_grids
+---
+Image 1 with grids.
+```
+
+Given an input image $\X$ at part 1 of {numref}`image_1_grids`, we divide the image into an $S \times S$ grid.
+We see there's a **person** and a **dog** in the image. 
+
+Part 2 of {numref}`image_1_grids` shows the **ground truth** bounding box of the object. 
+
+Part 3 of {numref}`image_1_grids` adds on the center of the bounding boxes as dots.
+
+In the case of the paper, $S=7$ implies YOLOv1 breaks the image up into a grid of size $7 \times 7$,
+as shown in part 4 of {numref}`image_1_grids`. The grids are drawn in white. There are a total
+of $7 \times 7 = 49$ grid cells. Note the distinction between the size of the grid $S$ and the grid cell.
+
+These grid cells represent prior boxes so that when the network predicts box coordinates,
+it has something to reference them from. Remember that earlier I said whenever you predict boxes, 
+you have to say with respect to what? Well it's with respect to these grid cells. More concretely,
+the network can detect objects by predicting scales and offsets from those prior boxes. 
+ 
+As an illustrative example, take the prior box on the 4th row and 4th column.
+It's centered on the **person**, so it seems reasonable that this prior box should be responsible 
+for predicting the person in this image.
+The 7x7 grid isn't actually drawn on the image, it's just implied,
+and the thing that implies it is the 7x7 grid in the output tensor. 
+You can imagine overlaying the output tensor on the image, and each cell corresponds to a
+part of the image. If you understand anchors, this idea should feel famililar to you 
+{cite}`YOLOV132:online`.
+
+Consequently, part 5 of {numref}`image_1_grids` highlighted the "responsible" grid cell for each object in red.
+
+So we have understood the first quote on why we divide the input image into an $S \times S$ grid.
+Since the person's center falls into the 4th row and 4th column, the grid cell at that position is then 
+our **ground truth** bounding box for the person in this image. Similarly, the dog's center falls into the
+5th row and 3rd column, the grid cell at that position is then our **ground truth** bounding box for the dog
+in this image. As an aside, all other grid cells are **background** and we will ignore them by assigning
+them all zeros, more on that later.
+
+We have answered the reason for why we need to divide the input image into an $S \times S$ grid. Next is 
+why there the output tensor's shape has a 3rd dimension of depth $B * 5 + C = 30$?
+
+> Each grid cell predicts $B$ bounding boxes and confidence
+scores for those boxes as well as $C$ conditional class probabilities {cite}`1506026487:online`.
+
+For each grid cell $i$, we a 30-d vector, 30 is derived from $5 \times B + C$ elements.
+
+So each cell is responsible for predicting boxes from a single part of the image. More specifically, each cell is responsible for predicting precisely two boxes for each part of the image. Note that there are 49 cells, and each cell is predicting two boxes, so the whole network is only going to predict 98 boxes. That number is fixed.
+
+In order to predict a single box, the network must output a number of things. Firstly it must encode the coordinates of the box which YOLO encodes as (x, y, w, h), where x and y are the center of the box. Earlier I suggested you familiarise yourself with box parameterisation, this is because YOLO does not output the actual coordinates of the box, but parameterised coordinates instead. Firstly, the width and height are normalised with respect to the image width, so if the network outputs a value of 1.0 for the width, it's saying the box should span the entire image, likewise 0.5 means it's half the width of the image. Note that the width and height have nothing to do with the actual grid cell itself. The x and y values are parameterised with respect to the grid cell, they represent offsets from the grid cell position. The grid cell has a width and height which is equal to 1/S (we've normalised the image to have width and height 1.0). If the network outputs a value of 1.0 for x, then it's saying that the x value of the box is the x position of the grid cell plus the width of the grid cell.
+
+Secondly, YOLO also predicts a confidence score for each box which represents the probability that the box contains an object. Lastly, YOLO predicts a class, which is represented by a vector of C values, and the predicted class is the one with the highest value. Now, here's the catch. YOLO does not predict a class for every box, it predicts a class for each cell. But each cell is associated with two boxes, so those boxes will have the same predicted class, even though they may have different shapes and positions. Let's tie all that together visually, let me copy down my diagram again.
+
+```{figure} https://storage.googleapis.com/reighns/images/label_matrix.png
+---
+name: label-matrix-copied
+---
+The output tensor from YOLOv1's last layer.
+```
+
+The first five values encode the location and confidence of the first box, the next five encode the location and confidence of the next box, and the final 20 encode the 20 classes (because Pascal VOC has 20 classes). In total, the size of the vector is 5xB + C where B is the number of boxes, and C is the number of classes.
+
+The way that YOLO actually predicts boxes, is by predicting target scale and offset values for each prior, these are parameterised by normalising by the width and height of the image. For example, take the highlighted top right cell in the output tensor, this particular cell corresponds to the far top right cell in the input image (which looks like the branch of a tree). That cell represents a prior box, which will have a width and height equal to the image width divided by 7 and image height divided by 7 respectively, and the location being the top right. The outputs from this single cell will therefore shift and stretch that prior box into new positions that hopefully contain the object.
+
+Because the cell predicts two boxes, it will shift and stretch the prior box in two different ways, possibly to cover two different objects (but both are constrained to have the same class). You might wonder why it's trying to do two boxes. The answer is probably because 49 boxes isn't enough, especially when there are lots of objects close together, although what tends to happen during training is that the predicted boxes become specialised. So one box might learn to find big things, the other might learn to find small things, this may help the network generalise to other domains.
+
+To wrap this section up, I want to point out one difference between the approach that YOLO has taken, and the anchor boxes in the Region Proposal Network. Anchors in the RPN actually refer to the nine different aspect ratios and scales from a single location. In other words, each position in the RPN predicts nine different boxes from nine different prior widths and heights. In contrast, it's as if YOLO has two anchors at each position, but they have the same width and height. YOLO does not introduce variations in aspect ratio or size into the anchor boxes.
+
+As a final note to help your intuition, it's reasonable to wonder why they didn't predict a class for each box. What would the output look like? You'd still have 7x7 cells, but instead of each cell being of size 5xB + C, you'd have (5+C) x B. So for two boxes, you'd have 50 outputs, not 30. That doesn't seem unreasonable, and it gives the network the flexibility to predict two different classes from the same location.
+
+
+## Notations and Definitions
+
+### Sample Image
+
+```{figure} https://storage.googleapis.com/reighns/images/grid_on_image.PNG
+---
+name: yolov1-sample-image
+---
+Sample Image with Grids.
+```
+
+
+
+(yolov1.md#bounding-box-parametrization)=
+### Bounding Box Parametrization
+
+Given a yolo format bounding box, we will perform parametrization to transform the 
+coordinates of the bounding box to a more convenient form. Before that, let us
+define some notations.
+
+````{prf:definition} YOLO Format Bounding Box
+:label: yolo-bbox
+
+The YOLO format bounding box is a 4-tuple vector consisting of the coordinates of
+the bounding box in the following order:
+
+$$
+\byolo = \begin{bmatrix} \xx_c & \yy_c & \ww_n & \hh_n \end{bmatrix} \in \R^{1 \times 4}
+$$ (yolo-bbox)
+
+where 
+
+- $\xx_c$ and $\yy_c$ are the coordinates of the center of the bounding box, 
+  normalized with respect to the image width and height;
+- $\ww_n$ and $\hh_n$ are the width and height of the bounding box,
+  normalized with respect to the image width and height.
+
+Consequently, all coordinates are in the range $[0, 1]$.
+````
+
+We could be done at this step and ask the model to predict the bounding box in
+YOLO format. However, the author proposes a more convenient parametrization for 
+the model to learn better:
+
+1. The center of the bounding box is parametrized as the offset from the top-left
+   corner of the grid cell to the center of the bounding box. We will go through an 
+   an example later.
+
+2. The width and height of the bounding box are parametrized to the square root
+   of the width and height of the bounding box. 
+   
+````{admonition} Intuition: Parametrization of Bounding Box
+The loss function of YOLOv1 is using mean squared errror.
+
+The square root is present so that errors in small bounding boxes are more penalizing
+than errors in big bounding boxes.
+Recall that square root mapping expands the range of small values for values between
+$0$ and $1$.
+
+For example, if the normalized width and height of a bounding box is $[0.05, 0.8]$ respectively,
+it means that the bounding box's width is 5% of the image width and height is 80% of the image height.
+We can scale it back since absolute numbers are easier to visualize.
+
+Given an image of size $100 \times 100$, the bounding box's width and height unnormalized are $5$ and $80$ respectively.
+Then let's say the model predicts the bounding box's width and height to be $[0.2, 0.95]$.
+The mean squared error is $(0.2 - 0.05)^2 + (0.95 - 0.8)^2 = 0.0225 + 0.0225 = 0.045$. We see that
+both errors are penalized equally. But if you scale the predicted bounding box's width and height back
+to the original image size, you will get $20$ and $95$ respectively, then the relative error is
+much worse for the width than the height (i.e both deviates 15 pixels but the width deviates much more 
+percentage wise).
+
+Consequently, the square root mapping is used to penalize errors in small bounding boxes more than
+the errors in big bounding boxes. If we use square root mapping, our original width and height
+becomes $[0.22, 0.89]$ and the predicted width and height becomes $[0.45, 0.97]$. The mean squared error
+is then $(0.45 - 0.22)^2 + (0.97 - 0.89)^2 = 0.0529 + 0.0064 = 0.0593$. We see that the error in the
+width is penalized more than the error in the height. This helps the model to learn better by 
+assigning more importance to small bounding boxes errors.
+````
+
+````{prf:definition} Parametrized Bounding Box
+:label: param-bbox
+
+The parametrized bounding box is a 4-tuple vector consisting of the coordinates of
+bounding box in the following order:
+
+$$
+\b = \begin{bmatrix} f(\xx_c, \gx) & f(\yy_c, \gy) & \sqrt{\ww_n} & \sqrt{\hh_n} \end{bmatrix} \in \R^{1 \times 4}
+$$ (param-bbox)
+
+where 
+
+- $\gx = \lfloor S \cdot \xx_c \rfloor$ is the grid cell column (row) index;
+- $\gy = \lfloor S \cdot \yy_c \rfloor$ is the grid cell row (column) index;
+- $f(\xx_c, \gx) = S \cdot \xx_c - \gx$ and;
+- $f(\yy_c, \gy) = S \cdot \yy_c - \gy$
+
+Take note that during construction, the square root is omitted because it is included
+in the loss function later. You will see in our code later that our $\b$ is actually
+
+$$
+\begin{align}
+\b &= \begin{bmatrix} f(\xx_c, \gx) & f(\yy_c, \gy) & \ww_n & \hh_n \end{bmatrix} \\
+   &= \begin{bmatrix} \xx & \yy & \ww & \hh \end{bmatrix}
+\end{align}
+$$
+
+We will be using the notation $[\xx, \yy, \ww, \hh]$ in the rest of the sections.
+
+As a side note, it is often the case that a single image has multiple bounding boxes. Therefore, 
+you will need to convert all of them to the parametrized form. 
+````
+
+````{prf:example} Example of Parametrization
+:label: param-bbox-example
+
+Consider the **TODO insert image** image. The bounding box is in the YOLO format at first.
+
+$$
+\byolo = \begin{bmatrix} 11 & 0.3442 & 0.611 & 0.4164 & 0.262
+         \end{bmatrix}   
+$$
+
+Then since $S = 7$, we can recover $f(\xx_c, \gx)$ and $f(\yy_c, \gy)$ as follows:
+
+$$
+\begin{aligned}
+\gx &= \lfloor 7 \cdot 0.3442  \rfloor &= 2 \\
+\gy &= \lfloor 7 \cdot 0.611   \rfloor &= 4 \\
+f(\xx_c, \gx) &= 7 \cdot 0.3442 - 2 &= 0.4093 \\
+f(\yy_c, \gy) &= 7 \cdot 0.611  - 4 &= 0.2770 \\
+\end{aligned}
+$$
+
+Visually, the bounding box of the dog actually lies in the 3rd column and 5th row $(3, 5)$ of the grid.
+But we compute it as if it lies in the 2nd column and 4th row $(2, 4)$ of the grid because in python
+the index starts from 0 and the top-left corner of the image is considered grid cell $(0, 0)$.
+
+Then the parametrized bounding box is:
+
+$$
+\b = \begin{bmatrix} 0.4093 & 0.2770 & \sqrt{0.4164} & \sqrt{0.262} \end{bmatrix} \in \R^{1 \times 4}
+$$
+````
+
+For more details, have a read at [this article](https://www.harrysprojects.com/articles/fastrcnn.html)
+to understand the parametrization.
+
+### Loss Function
+
+See below section.
+
+(yolov1.md#other-important-notations)=
+### Other Important Notations
+
+````{prf:definition} S, B and C
+:label: s-b-c
+
+
+- $S$: We divide an image into an $S \times S$ grid, so $S$ is the **grid size**;
+- $\gx$ denotes $x$-coordinate grid cell and $\gy$ denotes the $y$-coordinate grid cell and so the first grid cell can be denoted $(\gx, \gy) = (0, 0)$ or $(1, 1)$ if using python;
+- $B$: In each grid cell $(\gx, \gy)$, we can predict $B$ number of bounding boxes;
+- $C$: This is the number of classes;
+- Let $\cc \in \{1, 2, \ldots, 20\}$ be a **scalar**, which is the class index (id) where
+    - 20 is the number of classes;
+    - in Pascal VOC: `[aeroplane, bicycle, bird, boat, bottle, bus, car, cat, chair, cow, diningtable, dog, horse, motorbike, person, pottedplant, sheep, sofa, train, tvmonitor]`
+    - So if the object is class bicycle, then $\cc = 2$;
+    - Note in python notation, $\cc$ starts from $0$ and ends at $19$ so need to shift accordingly.
+````
+
+````{prf:definition} Probability Object
+:label: prob-object
+
+The author defines $\Pobj$ to be the probability that an object is present in a grid cell.
+This is constructed **deterministically** to be either $0$ or $1$. 
+
+To make the notation more compact, we will add a subscript $i$ to denote the grid cell.
+
+$$
+\Pobj_i = 
+\begin{cases}
+    1     & \textbf{if grid cell } i \textbf{ has an object}\\
+    0     & \textbf{otherwise}
+\end{cases}
+$$
+
+By definition, if a ground truth bounding box's center coordinates $(\xx_c, \yy_c)$
+falls in grid cell $i$, then $\Pobj_i = 1$ for that grid cell.
+````
+
+
+````{prf:definition} Ground Truth Confidence Score
+:label: gt-confidence
+
+The author defines the confidence score of the ground truth matrix 
+to be 
+
+$$
+\conf_i = \Pobj_i \times \iou
+$$
+
+where 
+
+$$\iou = \underset{\bhat_i \in \{\bhat_i^1, \bhat_i^2\}}{\max}\textbf{IOU}(\b_i, \bhat_i)$$
+
+where $\bhat_i^1$ and $\bhat_i^2$ are the two bounding boxes that are predicted by the model.
+
+It is worth noting to the readers that $\conf_i$ is also an indicator function, since
+$\Pobj_i$ from {prf:ref}`prob-object` is an indicator function. 
+
+More concretely,
+
+$$
+\conf_i =
+\begin{cases}
+    \textbf{IOU}(\b_i, \bhat_i)     & \textbf{if grid cell } i \textbf{ has an object}\\
+    0                               & \textbf{otherwise}
+\end{cases}
+$$
+
+since $\Pobj_i = 1$ if the grid cell has an object and $\Pobj_i = 0$ otherwise.
+
+Therefore, the author is using the IOU as a proxy for the confidence score in the ground truth matrix. 
+````
+
 ## From 3D Tensor to 2D Matrix
 
 We will now discuss how to convert the 3D tensor output of the YOLOv1 model to a 2D matrix.
 
-
-```{figure} https://storage.googleapis.com/reighns/images/2d_3d.PNG
+```{figure} ./assets/3dto2d.jpg
 ---
-name: 2dto3d
+name: 3dto2d
 ---
 Convert 3D tensor to 2D matrix
 ```
+
+Recall that the output of the YOLOv1 model is a 3D tensor of shape $(7, 7, 30)$ for a single image 
+(not including batch size). Visually, {numref}`image_1_grids` shows the $7$ by $7$ grid overlayed
+on the image, each grid will have a depth of $30$. However, when computing the loss function, 
+I took the liberty to squash the $7 \times 7$ grid into a single dimension, so instead of a cuboid,
+we now have a 2d rectangular matrix of shape $49 \times 30$.
+
 
 ## Construction of Ground Truth Matrix
 
@@ -664,7 +809,7 @@ of width and height. And recall that the ground truth bounding box's center dete
 which grid cell it belongs to, this is particularly important to remember.
 
 More formally, we denote the subscript $i$ to be the $i$-th grid cell where
-$i \in \{1, 2, \ldots 49\}$ as seen in figure {numref}`2dto3d`.
+$i \in \{1, 2, \ldots 49\}$ as seen in figure {numref}`3dto2d`.
 
 We will assume $S=7$, $B=2$, and $C=20$, where
 
@@ -678,15 +823,8 @@ a batch size of $N$, then we will have $N$ ground truth matrices.
 
 Consequently, each row of the ground truth matrix will have $2B + C = 30$ elements.
 
-Remember that each row $i$ of the ground truth matrix corresponds to the grid cell $i$.
-
-```{figure} ./assets/3d_to_2d_map_1.jpg
----
-name: 3d_to_2d_map_1
----
-Convert 3D tensor to 2D matrix.
-```
-
+Remember that each row $i$ of the ground truth matrix corresponds to the grid cell $i$
+as seen in figure {numref}`3dto2d`.
 
 ````{prf:definition} YOLOv1 Ground Truth Matrix
 :label: yolo_gt_matrix
@@ -846,11 +984,30 @@ the most confusing if you are not familiar with the notation.
 When I say grid cell $i$, it also means the $i$-th row of the ground truth and prediction matrix.
 ````
 
+Before we go on, some logistics:
+
+I directly saved the ground truth matrix and prediction matrix as `y_trues.pt` and `y_preds.pt` 
+respectively, you can load them with `torch.load` and they are in the shape of `[4, 7, 7, 30]`. 
+This means that there are 4 images in the batch, each image has a ground truth matrix of shape
+`[7, 7, 30]` and a prediction matrix of shape `[7, 7, 30]`. The 4 images are the first 4 images in our 
+first batch of the train loader.
+
+```{code-cell} ipython3
+# load directly the first batch of the train loader
+y_trues = torch.load("./assets/y_trues.pt")
+y_preds = torch.load("./assets/y_preds.pt")
+print(f"y_trues.shape: {y_trues.shape}")
+print(f"y_preds.shape: {y_preds.shape}")
+```
+
+Furthermore, `y_trues` corresponds to the ground truth matrix $\y$ and `y_preds` corresponds to the
+the prediction matrix $\hat{\y}$.
+
 ### Bipartite Matching
 
-ref: https://www.harrysprojects.com/articles/yolov1.html
+**TODO put more image**
 
-In our example image, there are 2 ground truth bounding box dog and human in that image. Let us zoom into just 1 grid cell's 30 element vector, say the dog (maybe input numbers here?) lie in the grid cell (3, 5) and therefore index is 26.
+In {numref}`image_1_grids`, there are 2 ground truth bounding box dog and human in that image. Let us zoom into just 1 grid cell's 30 element vector, say the dog (maybe input numbers here?) lie in the grid cell (3, 5) and therefore index is 26.
 
 ![](https://storage.googleapis.com/reighns/images/flattened_grid_cell.jpg)
 
@@ -873,9 +1030,19 @@ But why during our construction of the ground truth we have to put a placeholder
 
 **(Put admonition note)**
 
-What we have described above is a form of matching algorithm. To reiterate, a model like YOLOv1 can output and predict multiple $B$ number of bounding boxes ($B=2$), but you need to choose one out of the $B$ predicted bounding boxes to compute/compare with the ground truth bounding box. In YOLOv1, they used the same matching algorithm that two-staged detectors like Faster RCNN use, which use the IOU between the ground truth and predicted bounding boxes to determine matching, (i.e ground truth in grid cell i will match to the predicted bbox in grid cell i with the highest IOU between them).
+What we have described above is a form of matching algorithm. To reiterate, a model like 
+YOLOv1 can output and predict multiple $B$ number of bounding boxes ($B=2$), 
+but you need to choose one out of the $B$ predicted bounding boxes to compute/compare with
+the ground truth bounding box. In YOLOv1, they used the same matching algorithm that
+two-staged detectors like Faster RCNN use, which use the IOU between the ground truth
+and predicted bounding boxes to determine matching, (i.e ground truth in grid cell 
+$i$ will match to the predicted bbox in grid cell $i$ with the highest IOU between them).
 
-It's also worth pointing out that two-stage architectures also specify a minimum IOU for defining negative background boxes, and their loss functions explicitly ignore all predicted boxes that fall between these thresholds. YOLO doesn't do this, most likely because it's producing so few boxes anyway that it isn't a problem in practice. (https://www.harrysprojects.com/articles/yolov1.html)
+It's also worth pointing out that two-stage architectures also specify a minimum IOU 
+for defining negative background boxes, and their loss functions explicitly ignore 
+all predicted boxes that fall between these thresholds. 
+YOLO doesn't do this, most likely because it's producing so few boxes anyway that it isn't
+a problem in practice {cite}`YOLOV132:online`.
 
 
 ### Total Loss for a Single Image
@@ -890,25 +1057,73 @@ it is more beneficial to take a step back and recall that we are actually comput
 the loss over each grid cell $i$ and summing them (49 rows) up afterwards, which constitute
 to our total loss $\L(\y, \yhat)$.
 
+```{figure} ./assets/image_1_loss.jpg
+---
+name: yolov1-loss_1
+---
+Loss function for a single image.
+```
+
 Consequently, we define $\L_i$ to be the loss of each grid cell $i$ and simply say that 
 
 $$
 \begin{align}
     \L(\y, \yhat) & \overset{(a)}{=}  \sum_{i=1}^{S=7}\sum_{j=1}^{S=7} \L_{ij}(\y_{ij}, \yhat_{ij}) \\
                   & \overset{(b)}{=} \sum_{i=1}^{S^2=49} \L_i(\y_i, \yhat_i)                        \\
+                  & \overset{(c)}{=} \sum_{i=0}^{S^2=48} \L_i(\y_i, \yhat_i)                        \\
 \end{align}
 $$ (eq:yolov1-total-loss)
 
-but recall that the equation $(a)$ is not used by us as it is more cumbersome in notations, but just remember both are the same.
+but recall that the equation $(a)$ is not used by us as it is more cumbersome in notations, 
+but just remember that equation $(a)$ and $(b)$ are equivalent. Lastly, because we are
+dealing with python, we start our indexing from 0, hence the equation $(c)$. Do not get confused!
 
 Equation {eq}`eq:yolov1-total-loss` ***merely*** sums up the loss for 1 single image, 
 however, in deep learning, we also have the concept of batch size, where an additional batch 
 size dimension is added. Rest assured it is as simple as summing over the batches and averaging over batch only
 and will be shown in code later.
 
+$$
+\begin{align}
+    \L(\y, \yhat) & \overset{(d)}{=} \sum_{k=0}^{\text{Batch Size}}\L(\y^{k}, \yhat^{k})                       \\
+\end{align}
+$$ (eq:yolov1-total-loss-over-batches)
+
 ### Loss for a Single Grid Cell in a Single Image
 
 Let's zoom in on how to calculate loss for one grid cell $i$.
+
+Before that, recall that {eq}`eq:yolov1-total-loss` is the loss for a single image and takes
+in $\y$ and $\yhat$ as input. We first present both $\y$ and $\yhat$, a 2d natrix of shape
+$49 \times 30$ visualized as a pandas dataframe:
+
+```{code-cell} ipython3
+:tags: [remove-input]
+import pandas as pd
+
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', 1000)
+pd.set_option('display.colheader_justify', 'center')
+pd.set_option('display.precision', 3)
+
+y_true_df = pd.read_csv("./assets/y_true.csv")
+y_pred_df = pd.read_csv("./assets/y_pred.csv")
+```
+
+```{code-cell} ipython3
+:tags: [output_scroll, remove-input]
+
+display(y_true_df)
+```
+
+```{code-cell} ipython3
+:tags: [output_scroll, remove-input]
+
+display(y_pred_df)
+```
+
+In both the dataframes, each row corresponds to a grid cell, $\y_i$ and $\yhat_i$ respectively.
 
 $$
     \begin{align}
@@ -1128,3 +1343,7 @@ s
 
 
 [^1]: https://www.harrysprojects.com/articles/yolov1.html
+
+
+```{bibliography}
+```

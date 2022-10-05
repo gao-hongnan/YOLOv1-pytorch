@@ -69,6 +69,8 @@ class YOLOv1Loss2D(nn.Module):
 
     def forward(self, y_trues: torch.Tensor, y_preds: torch.Tensor):
         self._initiate_loss()
+        print("y_trues.shape", y_trues.shape)
+        print("y_preds.shape", y_preds.shape)
 
         # y_trues: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30) -> (batch_size, 49, 30)
         # y_preds: (batch_size, S, S, C + B * 5) = (batch_size, 7, 7, 30) -> (batch_size, 49, 30)
@@ -91,8 +93,11 @@ class YOLOv1Loss2D(nn.Module):
             y_pred_col_names = ["xhat^1", "yhat^1", "what^1", "hhat^1", "confhat^1", "xhat^2", "yhat^2", "what^2", "hhat^2", "confhat^2", "p1hat", "p2hat", "p3hat", "p4hat", "p5hat", "p6hat", "p7hat", "p8hat", "p9hat", "p10hat", "p11hat", "p12hat", "p13hat", "p14hat", "p15hat", "p16hat", "p17hat", "p18hat", "p19hat", "p20hat"]
             y_true_df = pd.DataFrame(data=y_true.cpu().detach().numpy(), index =[i for i in range(self.S * self.S)], columns = y_true_col_names)
             y_true_df.to_csv("y_true.csv")
+            y_pred_df = pd.DataFrame(data=y_pred.cpu().detach().numpy(), index =[i for i in range(self.S * self.S)], columns = y_pred_col_names)
+            y_pred_df.to_csv("y_pred.csv")
+            print(y_true_df.to_markdown())
             
-            print(y_true_df.head())
+            # print(y_true_df.head())
             # print(f"y_true {y_true}")
 
             # i is the grid cell index in my notes ranging from 0 to 48
@@ -150,7 +155,6 @@ class YOLOv1Loss2D(nn.Module):
                         # we can set conf_i = iou_b2 as well as the smaller of the two should be optimized to say there exist no object instead of proposing something.
                         # we can set conf_i = 0 as well and it will work.
                         self.no_object_conf_loss += self.lambda_noobj * self.compute_no_object_conf_loss(conf_i=torch.tensor(0., device="cuda"), confhat_i=y_pred_i[9])
-
                     else:
                         xhat_i, yhat_i, what_i, hhat_i = bhat_2
                         # same as above

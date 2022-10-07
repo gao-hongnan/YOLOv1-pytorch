@@ -1000,35 +1000,119 @@ print(f"y_trues.shape: {y_trues.shape}")
 print(f"y_preds.shape: {y_preds.shape}")
 ```
 
-Furthermore, `y_trues` corresponds to the ground truth matrix $\y$ and `y_preds` corresponds to the
-the prediction matrix $\hat{\y}$.
+To be consistent with our notation and definition in {prf:ref}`yolo_gt_matrix` and {prf:ref}`yolo_pred_matrix`,
+we will only use the first image in the batch, `y_true = y_trues[0]` and `y_pred = y_preds[0]` 
+and reshape them to be `[49, 30]` and `[49, 30]` respectively. Thus, `y_true`
+corresponds to the ground truth matrix 
+$\y$ and `y_pred` corresponds to the prediction matrix $\hat{\y}$.
+
+Both of these matrix are reshaped to $49 \times 30$ and visualized as a pandas dataframe:
+
+```{code-cell} ipython3
+:tags: [remove-input]
+import pandas as pd
+
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', 1000)
+pd.set_option('display.colheader_justify', 'center')
+pd.set_option('display.precision', 3)
+
+y_true_df = pd.read_csv("./assets/y_true.csv")
+y_pred_df = pd.read_csv("./assets/y_pred.csv")
+```
+
+```{code-cell} ipython3
+:tags: [output_scroll, remove-input]
+
+display(y_true_df)
+```
+
+```{code-cell} ipython3
+:tags: [output_scroll, remove-input]
+
+display(y_pred_df)
+```
 
 ### Bipartite Matching
 
 **TODO put more image**
 
-In {numref}`image_1_grids`, there are 2 ground truth bounding box dog and human in that image. Let us zoom into just 1 grid cell's 30 element vector, say the dog (maybe input numbers here?) lie in the grid cell (3, 5) and therefore index is 26.
+In {numref}`image_1_grids`, there are 2 ground truth bounding box dog and human in that image.
+Let us take the dog for an example, the dog lies in grid cell $i=30$ as the groundtruth, and
+is encoded in row 30 of the ground truth matrix $\y$.
+
+```{code-cell} ipython3
+:tags: [output_scroll, remove-input]
+
+display(y_true_df.iloc[30].to_frame().transpose())
+```
+
+A brief glance confirms that our encoding is sound, the first four elements are the coordinates
+of the bounding box, the fifth element is the object confidence score which is constructed as 1
+since there exists a ground truth inside. These 5 elements
+are repeated for the next 5 elements by design as we allow $B=2$ bounding boxes per grid cell.
+The last 20 elements are the class probabilities, one-hot encoded at the 12th index (11 if index starts
+from 0) because the dog class is the 12th class in the dataset.
+
+We now look at the corresponding grid cell in the prediction matrix $\hat{\y}$, note that this
+row is entirely predicted by the model during the first iteration, and numbers can be very
+different from the ground truth. The reason you see negative coordinates is because our outputs
+are not constrained, it ranges from $-\infty$ to $\infty$. A reasonable choice is to add a `nn.Sigmoid()`
+layer after the last layer of the `head` module, but we did not do that.
+
+
+```{code-cell} ipython3
+:tags: [output_scroll, remove-input]
+
+display(y_pred_df.iloc[30].to_frame().transpose())
+```
 
 ![](https://storage.googleapis.com/reighns/images/flattened_grid_cell.jpg)
 
+As seen in the figure, for the grid cell 30, the model predicts two bounding boxes, but there's only 
+one ground truth bounding box.
 
-The question that I had was that there is only 1 ground truth bbox coordinates for the dog $\b_{26}$, how then should we choose the which of the two predicted bounding boxes to compare to in the loss function? That is where the "matching happens", basically out of the two bounding box predicted by the model $\bhat_{26}^1$ and $\bhat_{26}^2$, only one can survive to eventually compare with the ground truth, and that is done by computing the IOU between the ground truth $\b_{26}$ with each $\bhat_{26}^1$ and $\bhat_{26}^2$ respectively and choosing the one with the highest IOU to be the survivor.
+```{code-cell} ipython3
+:tags: [output_scroll, remove-input]
 
-This is why in the construction of the ground truth we have this:
+b_gt = y_true_df.iloc[30, :4].values.flatten()
+b_pred_1 = y_pred_df.iloc[30, :4].values.flatten()
+b_pred_2 = y_pred_df.iloc[30, 5:9].values.flatten()
+
+print(f"b_gt: {b_gt}")
+print(f"b_pred_1: {b_pred_1}")
+print(f"b_pred_2: {b_pred_2}")
+```
+
+It then makes sense to only choose one of the ***two predicted*** bounding boxes to **match** with the
+ground truth bounding box. This is where the bipartite matching comes in, we will choose the
+bounding box with the highest IOU (Intersection over Union) with the ground truth bounding box.
+In other words, we use IOU as a proxy to measure the similarity metric of `IOU(b_gt, b_pred_1)`
+and `IOU(b_gt, b_pred_2)`. The bounding box (`b_pred_1` or `b_pred_2` but never both)
+with the highest IOU will be the one that we choose to compute the loss with.
+
+And this is why in the paper {cite}`1506026487:online,`, the authors mentioned that the
+construction of the **confidence in ground truth** to be:
 
 $$
-\conf = 
+\conf_i =
 \begin{cases}
-    1  = 1 \times \iou       & \text{if } \textbf{grid cell i has an object}\\
-    0  = 0  \times \iou      & \text{otherwise}
+    \textbf{IOU}(\b_i, \bhat_i)     & \textbf{if grid cell } i \textbf{ has an object}\\
+    0                               & \textbf{otherwise}
 \end{cases}
 $$
 
-where we define the confidence score of the ground truth to be the IOU between the ground truth $\b_{26}$ and the "survivor" $\bhat_{26}$, chosen out of the two predictions, as was shown $\underset{\bhat_i \in \{\bhat_i^1, \bhat_i^2\}}{\max}\textbf{IOU}(\b_i, \bhat_i)$.
+where we define the confidence score of the ground truth to be the IOU between the
+ground truth $\b_{30}$ and the "survivor" $\bhat_{30}$, chosen out of the two predictions,
+by $\underset{\bhat_i \in \{\bhat_i^1, \bhat_i^2\}}{\max}\textbf{IOU}(\b_i, \bhat_i)$.
 
-But why during our construction of the ground truth we have to put a placeholder $1$ or $0$ first? That is because before the model predictions were made, there is no way we know the IOU between the ground truth and the predicted bounding boxes.
-
-**(Put admonition note)**
+````{admonition} Note
+During our construction of the ground truth matrix in {prf:ref}`yolo_gt_matrix`, we set the confidence score
+to be 1 if there is an object in the grid cell, and 0 otherwise. These numbers are a placeholder
+and will only be realized during training, as we will only know the IOU between the ground truth
+and the predicted bounding box during training.
+````
 
 What we have described above is a form of matching algorithm. To reiterate, a model like 
 YOLOv1 can output and predict multiple $B$ number of bounding boxes ($B=2$), 
@@ -1044,12 +1128,66 @@ all predicted boxes that fall between these thresholds.
 YOLO doesn't do this, most likely because it's producing so few boxes anyway that it isn't
 a problem in practice {cite}`YOLOV132:online`.
 
-
 ### Total Loss for a Single Image
 
 Having the construction of the ground truth and the prediction matrix, it is now time to understand
 how the loss function is formulated. I took the liberty to change the notations from the original
 paper for simplicity.
+
+Let's look at the original loss function from the paper {cite}`1506026487:online`:
+
+$$
+\begin{align}
+\mathcal{L}(\y, \yhat) 
+&= \color{blue}{\lambda_\textbf{coord}
+\sum_{i = 0}^{S^2}
+    \sum_{j = 0}^{B}
+     {\mathbb{1}}_{ij}^{\text{obj}}
+            \left[
+            \left(
+                x_i - \hat{x}_i
+            \right)^2 +
+            \left(
+                y_i - \hat{y}_i
+            \right)^2
+            \right]} \\
+&= \color{blue}{\lambda_\textbf{coord} 
+\sum_{i = 0}^{S^2}
+    \sum_{j = 0}^{B}
+         {\mathbb{1}}_{ij}^{\text{obj}}
+         \left[
+        \left(
+            \sqrt{w_i} - \sqrt{\hat{w}_i}
+        \right)^2 +
+        \left(
+            \sqrt{h_i} - \sqrt{\hat{h}_i}
+        \right)^2
+        \right]} \\
+&= \color{green}{
+ \sum_{i = 0}^{S^2}
+    \sum_{j = 0}^{B}
+        {\mathbb{1}}_{ij}^{\text{obj}}
+        \left(
+            C_i - \hat{C}_i
+        \right)^2} \\
+&= \color{green}{\lambda_\textrm{noobj}
+\sum_{i = 0}^{S^2}
+    \sum_{j = 0}^{B}
+    {\mathbb{1}}_{ij}^{\text{noobj}}
+        \left(
+            C_i - \hat{C}_i
+        \right)^2} \\
+&= \color{red}{
+ \sum_{i = 0}^{S^2}
+{{1}}_i^{\text{obj}}
+    \sum_{c \in \textrm{classes}}
+        \left(
+            p_i(c) - \hat{p}_i(c)
+        \right)^2}
+\end{align}
+$$
+
+Before we dive into what each equation means, we first establish the notations that we will be using:
 
 We define the loss function to be $\L$, a function of $\y$ and $\yhat$ respectively. 
 However, owing to the fact $\y$ and $\yhat$ are both of shape $\R^{49 \times 30}$, 
@@ -1091,39 +1229,29 @@ $$ (eq:yolov1-total-loss-over-batches)
 
 ### Loss for a Single Grid Cell in a Single Image
 
-Let's zoom in on how to calculate loss for one grid cell $i$.
+The simplication in the previous section is to allow us to better appreciate what each equation in the loss
+function mean.
 
-Before that, recall that {eq}`eq:yolov1-total-loss` is the loss for a single image and takes
-in $\y$ and $\yhat$ as input. We first present both $\y$ and $\yhat$, a 2d natrix of shape
-$49 \times 30$ visualized as a pandas dataframe:
+Let's zoom in on how to calculate loss for one grid cell $i$. And as continuity, we will use the
+$i=30$ grid cell as an example, the one which the dog is located in.
 
-```{code-cell} ipython3
-:tags: [remove-input]
-import pandas as pd
+````{admonition} Intuition
+Before we look at the seemingly scary formula, let us first think retrospectively on what the loss
+should penalize/maximize. 
 
-pd.set_option('display.max_rows', None)
-pd.set_option('display.max_columns', None)
-pd.set_option('display.width', 1000)
-pd.set_option('display.colheader_justify', 'center')
-pd.set_option('display.precision', 3)
+1. The loss should penalize the model if the predicted bounding box x-y coordinates is far away from the ground truth.
+2. The loss should penalize the model if the predicted bounding box width and height is far away from the ground truth.
+3. The loss should penalize the model if the predicted bounding box has low confidence that the grid cell has
+an object where in fact there is an object. This means the model is not confident enough to predict that
+this grid cell has an object.
+4. The loss should penalize the model if the predicted bounding box has high confidence that the grid cell
+has an object where in fact there is no object.
+5. The loss should penalize the model if the predicted bounding box is not predicting the correct class.
+````
 
-y_true_df = pd.read_csv("./assets/y_true.csv")
-y_pred_df = pd.read_csv("./assets/y_pred.csv")
-```
+#### The Modified Formula
 
-```{code-cell} ipython3
-:tags: [output_scroll, remove-input]
-
-display(y_true_df)
-```
-
-```{code-cell} ipython3
-:tags: [output_scroll, remove-input]
-
-display(y_pred_df)
-```
-
-In both the dataframes, each row corresponds to a grid cell, $\y_i$ and $\yhat_i$ respectively.
+Firstly, for one grid cell $i$, the loss $\L_i(\y_i, \yhat_i)$ is defined as:
 
 $$
     \begin{align}
@@ -1135,12 +1263,19 @@ $$
     \end{align}
 $$
 
-- $\mathbb{1}_{i}^{obj}$ is $1$ when there is an object in cell $i$ and $0$ elsewhere
-- $\mathbb{1}_{ij}^{obj}$ "denotes that the $j$th bounding box predictor in cell $i$ is responsible for that prediction". In other words, it is equal to $1$ if there is an object in cell $i$ and confidence of the $j$th predictors of this cell is the highest among all the predictors of this cell. $\mathbb{1}_{ij}^{noobj}$ is almost the same except it values 1 when there are NO objects in cell $i$
+where
 
-Note carefully $j$ in this context is the indices of the bounding box predictors in each grid cell i.e. in $\bhat^1$ is the 1st predicted bounding box and the 1 refers to the index $j=1$.
-
-Do not be afraid of the $\1_{ij}^{\text{obj}}$, it simply means that in grid cell $i$, we loop over the number of bounding boxes (which is 2), and then for each predicted bounding box, we check what $\1_{ij}^{\text{obj}}$ evaluates to:
+- We removed the outer summation over $i$ as we are only looking at one grid cell $i$.
+- $\mathbb{1}_{i}^{obj}$ is $1$ when there is a **ground truth object** in cell $i$ and $0$ otherwise. 
+- $\mathbb{1}_{ij}^{obj}$ denotes that the $j$th bounding box predictor in cell $i$ that is responsible for that prediction. 
+  - In other words, it is equal to $1$ if there is a **ground truth object** in cell $i$ and 
+  IOU score of the $j$th predictors of this cell is the highest among all the predictors of this cell
+  when compared to the ground truth. 
+- $\mathbb{1}_{ij}^{noobj}$ is the opposite of $\mathbb{1}_{ij}^{obj}$, where it is $1$ when there is no **ground truth object** in cell $i$ 
+and the $j$th bounding box predictor in cell $i$ has the highest IOU score among all the predictors of this cell
+when compared to the ground truth. **More on this later as there can be a few interpretations.**
+- Note carefully $j$ in this context is the indices of the bounding box predictors in each grid cell i.e. in $\bhat^1$ is the 1st predicted bounding box and the 1 refers to the index $j=1$.
+- Do not be afraid of the $\1_{ij}^{\text{obj}}$, it simply means that in grid cell $i$, we loop over the number of bounding boxes (which is 2), and then for each predicted bounding box, we check what $\1_{ij}^{\text{obj}}$ evaluates to:
 
 $$
 \1_{ij}^{\text{obj}} = 
@@ -1150,7 +1285,117 @@ $$
 \end{cases}
 $$
 
-and **what is matched with an object mean? -> it means EXPLAIN HERE ON BIPARTITE MATCH**
+and **what is matched with an object mean? -> it means the bipartite matching algorithm discussed in the previous section**.
+
+Let's briefly go through this term by term:
+
+- The first part of the equation computes the loss between the predicted bounding box x-y offsets $(\xhat_i, \yhat_i)$ 
+  and the ground-truth bounding box x-y offsets $(\x_i, \y_i)$.
+
+  It is calculated for all the 49 grid cells, and only one of the two bounding boxes is considered in the loss. Remember, it only penalizes bounding box coordinate error for the predictor that is “responsible” for the ground-truth box (i.e., has the highest IOU of any predictor in that grid cell).
+
+  In short, we will see out of the two bounding boxes which have the highest IOU with the target bounding box, and that will get prioritized for the loss computation.
+
+  Finally, we weigh the loss with a constant \lambda_\text{coord}=5 to ensure that our bounding box predictions are as close as possible to the target. Lastly, an identity function 1^\text{obj}_{ij} denotes that the jth bounding box predictor in cell i is responsible for that prediction. Thus, it will be 1 if the target object exists and 0 otherwise.
+
+
+  Before that, recall that {eq}`eq:yolov1-total-loss` is the loss for a single image and takes
+  in $\y$ and $\yhat$ as input. 
+
+  Let $\jmax$ be the index of the bounding box with the highest confidence score in cell $i$.
+
+  $\jmax = \underset{j \in \{1,2\}}{\operatorname{argmax}} \textbf{IOU}(\b_i, \bhat_i^j)$
+
+
+
+$$
+    \begin{align}
+        \L_i(\y_i, \yhat_i) & \overset{(a)}{=}  \color{blue}{\lambda_\textbf{coord} \obji \lsq \lpar x_i - \hat{x}_i^{\jmax} \rpar^2 + \lpar y_i - \hat{y}_i^{\jmax}  \rpar^2 \rsq}                             \\
+                            & \overset{(b)}{+}  \color{blue}{\lambda_\textbf{coord} \obji \lsq \lpar \sqrt{w_i} - \sqrt{\hat{w}_i^{\jmax} } \rpar^2 + \lpar \sqrt{h_i} - \sqrt{\hat{h}_i^{\jmax} } \rpar^2 \rsq} \\
+                            & \overset{(c)}{+}  \color{green}{\obji \lpar \conf_i - \confhat_i^{\jmax} \rpar^2}                                                                                          \\
+                            & \overset{(d)}{+} \color{green}{\lambda_\textbf{noobj} \nobji \lpar \conf_i - \confhat_i^{\jmax} \rpar^2}                                                                  \\
+                            & \overset{(e)}{+}  \color{red}{\obji \sum_{c \in \cc} \lpar \p_i(c) - \phat_i(c) \rpar^2}                                                                                               \\
+    \end{align}
+$$
+
+thereby collapsing the equation to checking only two conditions:
+- $\obji$ is $1$ when there is an object in cell $i$ and $0$ elsewhere
+- $\1_{i}^{\text{noobj}}$ is $1$ when there is no object in cell $i$ and $0$ elsewhere
+
+- $\y_i$ is exactly as defined in {prf:ref}`yolo_gt_matrix`'s equation {eq}`eq:gt_yi`.
+
+#### Matching
+
+After the forward pass, the model will have encoded the ground truth $\b_30$ and
+the two predicted bounding boxes $\bhat_i^1$ and $\bhat_i^2$. Our first step is to 
+determine which of the two predicted bounding boxes is the best match for the ground truth,
+the filtering process is done by the IOU metric.
+
+```{code-cell} ipython3
+:tags: [output_scroll, remove-input]
+def intersection_over_union(bbox_1, bbox_2, bbox_format = "yolo") -> torch.Tensor:
+    """Calculates intersection over union between two bounding boxes.
+
+    References:
+        Code modified from https://github.com/aladdinpersson/Machine-Learning-Collection
+    """
+    assert bbox_format in ["yolo", "voc", "albu"]
+
+    if isinstance(bbox_1, np.ndarray):
+        bbox_1 = torch.from_numpy(bbox_1)
+
+    if isinstance(bbox_2, np.ndarray):
+        bbox_2 = torch.from_numpy(bbox_2)
+
+    if bbox_format == "yolo":
+        bbox_1 = yolo2albu(bbox_1)
+        bbox_2 = yolo2albu(bbox_2)
+
+    # at this stage bbox must be in either albu or voc format.
+    box1_x1 = bbox_1[..., 0:1]
+    box1_y1 = bbox_1[..., 1:2]
+    box1_x2 = bbox_1[..., 2:3]
+    box1_y2 = bbox_1[..., 3:4]
+    box2_x1 = bbox_2[..., 0:1]
+    box2_y1 = bbox_2[..., 1:2]
+    box2_x2 = bbox_2[..., 2:3]
+    box2_y2 = bbox_2[..., 3:4]
+
+    x1 = torch.max(box1_x1, box2_x1)
+    y1 = torch.max(box1_y1, box2_y1)
+    x2 = torch.min(box1_x2, box2_x2)
+    y2 = torch.min(box1_y2, box2_y2)
+
+    # .clamp(0) is for the case when they do not intersect
+    intersection = (x2 - x1).clamp(0) * (y2 - y1).clamp(0)
+
+    box1_area = abs((box1_x2 - box1_x1) * (box1_y2 - box1_y1))
+    box2_area = abs((box2_x2 - box2_x1) * (box2_y2 - box2_y1))
+
+    iou = intersection / (box1_area + box2_area - intersection + 1e-6)
+    # https://pytorch.org/docs/stable/generated/torch.Tensor.item.html
+    # squeeze all dimensions to scalar
+    iou = iou.item()
+
+    return iou
+```
+
+
+
+
+Assuming that the matching is done, for the predicted boxes that are matched to ground truth boxes 
+the loss function is minimizing the error between those boxes,
+maximising the objectness confidence, and maximising the liklihood of the correct class
+(which is shared between two boxes). 
+For all predicted boxes that are not matched with a ground truth box, 
+it is minimising the objectness confidence, but ignoring the box coordinates 
+and class probabilities {cite}`YOLOV132:online`.
+
+In both the dataframes, each row corresponds to a grid cell, $\y_i$ and $\yhat_i$ respectively.
+
+
+
+
 
 ### Change of Notation
 

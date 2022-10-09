@@ -76,7 +76,7 @@ class YOLOv1Loss2D(nn.Module):
         w_loss = self.mse(torch.sqrt(w_i), torch.sqrt(torch.abs(what_i + epsilon)))
         h_loss = self.mse(torch.sqrt(h_i), torch.sqrt(torch.abs(hhat_i + epsilon)))
         wh_loss = w_loss + h_loss
-
+        
         return wh_loss
 
 
@@ -130,71 +130,55 @@ class YOLOv1Loss2D(nn.Module):
             y_true = y_trues[batch_index]                                       # y:    (49, 30)
             y_pred = y_preds[batch_index]                                       # yhat: (49, 30)
 
-            for i in range(self.S * self.S):                                    # i is the grid cell index [0, 48] 
-                y_true_i = y_true[i]                                            # y_i:    (30,) or (1, 30)
-                y_pred_i = y_pred[i]                                            # yhat_i: (30,) or (1, 30)
+            for i in range(self.S * self.S):                                                        # i is the grid cell index [0, 48] 
+                y_true_i = y_true[i]                                                                # y_i:    (30,) or (1, 30)
+                y_pred_i = y_pred[i]                                                                # yhat_i: (30,) or (1, 30)
                 
-                indicator_obj_i = y_true_i[4] == 1                              # this is $\obji$ and checking y_true[i, 4] is sufficient since y_true[i, 9] is repeated
+                indicator_obj_i = y_true_i[4] == 1                                                  # this is $\obji$ and checking y_true[i, 4] is sufficient since y_true[i, 9] is repeated
 
-                if indicator_obj_i:                                             # here equation (a), (b), (c) and (e) of the loss equation on a single grid cell.
-                    b = y_true_i[0:4]                                           # b:    (4,) or (1, 4)
-                    bhat_1 = y_pred_i[0:4]                                      # bhat1: (4,) or (1, 4)
-                    bhat_2 = y_pred_i[5:9]                                      # bhat2: (4,) or (1, 4)
+                if indicator_obj_i:                                                                 # here equation (a), (b), (c) and (e) of the loss equation on a single grid cell.
+                    b = y_true_i[0:4]                                                               # b:    (4,) or (1, 4)
+                    bhat_1 = y_pred_i[0:4]                                                          # bhat1: (4,) or (1, 4)
+                    bhat_2 = y_pred_i[5:9]                                                          # bhat2: (4,) or (1, 4)
                     
-                    x_i, y_i, w_i, h_i = b                                      # x_i, y_i, w_i, h_i: (1,)
+                    x_i, y_i, w_i, h_i = b                                                          # x_i, y_i, w_i, h_i: (1,)
                     # at this stage jmax is not known yet.
-                    xhat_i1, yhat_i1, what_i1, hhat_i1 = bhat_1                 # xhat_i1, yhat_i1, what_i1, hhat_i1: (1,)
-                    xhat_i2, yhat_i2, what_i2, hhat_i2 = bhat_2                 # xhat_i2, yhat_i2, what_i2, hhat_i2: (1,)
+                    xhat_i1, yhat_i1, what_i1, hhat_i1 = bhat_1                                     # xhat_i1, yhat_i1, what_i1, hhat_i1: (1,)
+                    xhat_i2, yhat_i2, what_i2, hhat_i2 = bhat_2                                     # xhat_i2, yhat_i2, what_i2, hhat_i2: (1,)
                     
-                    conf_i, confhat_i1, confhat_i2 = y_true_i[4], y_pred_i[4], y_pred_i[9] # conf_i, confhat_i1, confhat_i2: (1,)
+                    conf_i, confhat_i1, confhat_i2 = y_true_i[4], y_pred_i[4], y_pred_i[9]          # conf_i, confhat_i1, confhat_i2: (1,)
                     
-                    p_i, phat_i = y_true_i[10:], y_pred_i[10:]                 # p_i, phat_i: (20,) or (1, 20)
+                    p_i, phat_i = y_true_i[10:], y_pred_i[10:]                                      # p_i, phat_i: (20,) or (1, 20)
 
                     # area of overlap
-                    iou_b1 = intersection_over_union(b, bhat_1, bbox_format="yolo")
-                    iou_b2 = intersection_over_union(b, bhat_2, bbox_format="yolo")
+                    iou_b1 = intersection_over_union(b, bhat_1, bbox_format="yolo")                 # iou of b and bhat1
+                    iou_b2 = intersection_over_union(b, bhat_2, bbox_format="yolo")                 # iou of b and bhat2
 
                     # max iou
                     if iou_b1 > iou_b2:
-                        xhat_i, yhat_i, what_i, hhat_i = bhat_1
                         # conf_i = max_{bhat \in {bhat_1, bhat_2}} IoU(b, bhat)
                         # however I set conf_i = y_true_i[4] = 1 here as it gives better results for our case
-                        conf_i, confhat_i = y_true_i[4], y_pred_i[4]
-                        
-                        # fmt: off
-                        # equation 1
-                        self.bbox_xy_offset_loss += self.lambda_coord * self.compute_xy_offset_loss(x_i, xhat_i, y_i, yhat_i)
-
-                        # make them abs as sometimes the preds can be negative if no sigmoid layer.
-                        # add 1e-6 for stability
-                        self.bbox_wh_loss += self.lambda_coord * self.compute_wh_loss(w_i, what_i, h_i, hhat_i)
-
-                        self.object_conf_loss += self.compute_object_conf_loss(conf_i, confhat_i)
-
-                        # mention 2 other ways
-                        # iou比较小的bbox不负责预测物体，因此confidence loss算在noobj中，注意，对于标签的置信度应该是iou2
-                        # we can set conf_i = iou_b2 as well as the smaller of the two should be optimized to say there exist no object instead of proposing something.
-                        # we can set conf_i = 0 as well and it will work.
-                        self.no_object_conf_loss += self.lambda_noobj * self.compute_no_object_conf_loss(conf_i=torch.tensor(0., device="cuda"), confhat_i=y_pred_i[9])
+                        xhat_i_jmax, yhat_i_jmax, what_i_jmax, hhat_i_jmax, confhat_i_jmax = xhat_i1, yhat_i1, what_i1, hhat_i1, confhat_i1
+                        confhat_i_complement = confhat_i2
                     else:
-                        xhat_i, yhat_i, what_i, hhat_i = bhat_2
-                        # same as above
-                        conf_i, confhat_i = y_true_i[4], y_pred_i[9]
+                        xhat_i_jmax, yhat_i_jmax, what_i_jmax, hhat_i_jmax, confhat_i_jmax = xhat_i2, yhat_i2, what_i2, hhat_i2, confhat_i2
+                        confhat_i_complement = confhat_i1
+                        
+                    # fmt: off
+                    self.bbox_xy_offset_loss += self.lambda_coord * self.compute_xy_offset_loss(x_i, xhat_i_jmax, y_i, yhat_i_jmax)                 # equation 1
 
-                        # equation 1
-                        self.bbox_xy_offset_loss += self.lambda_coord * self.compute_xy_offset_loss(x_i, xhat_i, y_i, yhat_i)
+                    # make them abs as sometimes the preds can be negative if no sigmoid layer.
+                    # add 1e-6 for stability
+                    self.bbox_wh_loss += self.lambda_coord * self.compute_wh_loss(w_i, what_i_jmax, h_i, hhat_i_jmax)
 
-                        # make them abs as sometimes the preds can be negative if no sigmoid layer.
-                        # add 1e-6 for stability
-                        self.bbox_wh_loss += self.lambda_coord * self.compute_wh_loss(w_i, what_i, h_i, hhat_i)
+                    self.object_conf_loss += self.compute_object_conf_loss(conf_i, confhat_i_jmax)
 
-                        self.object_conf_loss += self.compute_object_conf_loss(conf_i, confhat_i)
-
-                        # mention 2 other ways
-                        # we can set conf_i = iou_b1 as well as the smaller of the two should be optimized to say there exist no object instead of proposing something.
-                        # we can set conf_i = 0 as well and it will work.
-                        self.no_object_conf_loss += self.lambda_noobj * self.compute_no_object_conf_loss(conf_i=torch.tensor(0., device=self.device), confhat_i=y_pred_i[4])
-
+                    # mention 2 other ways
+                    # iou比较小的bbox不负责预测物体，因此confidence loss算在noobj中，注意，对于标签的置信度应该是iou2
+                    # we can set conf_i = iou_b2 as well as the smaller of the two should be optimized to say there exist no object instead of proposing something.
+                    # we can set conf_i = 0 as well and it will work.
+                    # TODO: comment for blog if uncomment it performs a bit better early.
+                    # self.no_object_conf_loss += self.lambda_noobj * self.compute_no_object_conf_loss(conf_i=torch.tensor(0., device="cuda"), confhat_i=confhat_i_complement)
                     self.class_loss += self.compute_class_loss(p_i, phat_i)
                 else:
                     # equation 4
@@ -207,8 +191,6 @@ class YOLOv1Loss2D(nn.Module):
                     for j in range(self.B):
                         self.no_object_conf_loss += self.lambda_noobj * self.compute_no_object_conf_loss(conf_i=y_true_i[4], confhat_i=y_pred_i[4 + j * 5])
 
-            print("\n")
-            break
         total_loss = (
             self.bbox_xy_offset_loss
             + self.bbox_wh_loss

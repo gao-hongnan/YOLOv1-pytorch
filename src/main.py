@@ -5,8 +5,10 @@ from model import Yolov1Darknet
 from train import train_one_epoch, valid_one_epoch
 from dataset import VOCDataset, get_transform
 from utils import seed_all
-from loss import YoloLoss, YOLOv1Loss, YOLOv1Loss2D
+
+# from loss import YoloLoss, YOLOv1Loss, YOLOv1Loss2D
 from config import config
+from loss_debug import YOLOv1Loss2D
 
 DEBUG = True
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"  # "mps" # if macos m1

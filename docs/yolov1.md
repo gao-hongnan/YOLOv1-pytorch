@@ -510,7 +510,7 @@ The 7x7 grid isn't actually drawn on the image, it's just implied,
 and the thing that implies it is the 7x7 grid in the output tensor. 
 You can imagine overlaying the output tensor on the image, and each cell corresponds to a
 part of the image. If you understand anchors, this idea should feel famililar to you 
-{cite}`YOLOV132:online`.
+{cite}`turner_2021`.
 
 Consequently, part 5 of {numref}`image_1_grids` highlighted the "responsible" grid cell for each object in red.
 
@@ -936,7 +936,7 @@ $$
 = \begin{bmatrix}
 \bhat_i^1 & \confhat_i^1 & \bhat_i^2 & \confhat_i^2 & \phat_i 
 \end{bmatrix} \in \R^{1 \times 30}
-$$
+$$ (eq:gt_yhati)
 
 where
 
@@ -1123,7 +1123,7 @@ In other words, we use IOU as a proxy to measure the similarity metric of `IOU(b
 and `IOU(b_gt, b_pred_2)`. The bounding box (`b_pred_1` or `b_pred_2` but never both)
 with the highest IOU will be the one that we choose to compute the loss with.
 
-And this is why in the paper {cite}`redmon_divvala_girshick_farhadi_2016,`, the authors mentioned that the
+And this is why in the paper {cite}`redmon_divvala_girshick_farhadi_2016`, the authors mentioned that the
 construction of the **confidence in ground truth** to be:
 
 $$
@@ -1157,7 +1157,7 @@ It's also worth pointing out that two-stage architectures also specify a minimum
 for defining negative background boxes, and their loss functions explicitly ignore 
 all predicted boxes that fall between these thresholds. 
 YOLO doesn't do this, most likely because it's producing so few boxes anyway that it isn't
-a problem in practice {cite}`YOLOV132:online`.
+a problem in practice {cite}`turner_2021`.
 
 ### Total Loss for a Single Image
 
@@ -1296,13 +1296,13 @@ Consequently, we define $\L_i(\y_i, \yhat_i)$ to be the loss of each grid cell $
 
 $$
     \begin{align}
-        \L_i(\y_i, \yhat_i) & = \color{blue}{\lambda_\textbf{coord} \sum_{j=1}^{B=2} \1_{ij}^{\text{obj}} \lsq \lpar x_i - \hat{x}_i^j \rpar^2 + \lpar y_i - \hat{y}_i^j \rpar^2 \rsq}                             \\
-                            & + \color{blue}{\lambda_\textbf{coord} \sum_{j=1}^{B=2} \1_{ij}^{\text{obj}} \lsq \lpar \sqrt{w_i} - \sqrt{\hat{w}_i^j} \rpar^2 + \lpar \sqrt{h_i} - \sqrt{\hat{h}_i^j} \rpar^2 \rsq} \\
-                            & + \color{green}{\sum_{j=1}^{B=2} \1_{ij}^{\text{obj}} \lpar \conf_i - \confhat_i^j \rpar^2}                                                                                          \\
-                            & + \color{green}{\lambda_\textbf{noobj}\sum_{j=1}^{B=2} \1_{ij}^{\text{noobj}} \lpar \conf_i - \confhat_i^j \rpar^2}                                                                  \\
-                            & + \color{red}{\obji \sum_{c \in \cc} \lpar \p_i(c) - \phat_i(c) \rpar^2}                                                                                               \\
+        \L_i(\y_i, \yhat_i) & \overset{(a)}{=} \color{blue}{\lambda_\textbf{coord} \sum_{j=1}^{B=2} \1_{ij}^{\text{obj}} \lsq \lpar x_i - \hat{x}_i^j \rpar^2 + \lpar y_i - \hat{y}_i^j \rpar^2 \rsq}                             \\
+                            & \overset{(b)}{+} \color{blue}{\lambda_\textbf{coord} \sum_{j=1}^{B=2} \1_{ij}^{\text{obj}} \lsq \lpar \sqrt{w_i} - \sqrt{\hat{w}_i^j} \rpar^2 + \lpar \sqrt{h_i} - \sqrt{\hat{h}_i^j} \rpar^2 \rsq} \\
+                            & \overset{(c)}{+} \color{green}{\sum_{j=1}^{B=2} \1_{ij}^{\text{obj}} \lpar \conf_i - \confhat_i^j \rpar^2}                                                                                          \\
+                            & \overset{(d)}{+} \color{green}{\lambda_\textbf{noobj}\sum_{j=1}^{B=2} \1_{ij}^{\text{noobj}} \lpar \conf_i - \confhat_i^j \rpar^2}                                                                  \\
+                            & \overset{(e)}{+} \color{red}{\obji \sum_{c \in \cc} \lpar \p_i(c) - \phat_i(c) \rpar^2}                                                                                               \\
     \end{align}
-$$
+$$ (eq:yolov1-loss-for-single-grid-cell)
 
 where
 
@@ -1332,23 +1332,112 @@ and the $j$th bounding box predictor in cell $i$ has the highest IOU score among
 when compared to the ground truth. **More on this later as there can be a few interpretations.**
 - Note carefully $j$ in this context is the indices of the bounding box predictors in each grid cell i.e. in $\bhat^1$ is the 1st predicted bounding box and the 1 refers to the index $j=1$.
 - A constant on **what is matched with an object mean? -> it means the bipartite matching algorithm discussed in the previous section**.
-- Last but not least, the $\xx_i$, $\yy_i$, $\ww_i$, $\hh_i$ are the ground truth bounding box coordinates and $\hat{\xx}_i^j$, $\hat{\yy}_i^j$, $\hat{\ww}_i^j$, $\hat{\hh}_i^j$ are the predicted bounding box coordinates.
-- The $\conf_i$ and $\confhat_i^j$ are the ground truth confidence score and the predicted confidence score respectively.
-- The $\obji$ is $1$ if there is a ground truth object in cell $i$ and $0$ otherwise.
+- Last but not least, the $\xx_i$, $\yy_i$, $\ww_i$, $\hh_i$ are the ground truth bounding box coordinates and $\hat{\xx}_i^j$, $\hat{\yy}_i^j$, $\hat{\ww}_i^j$, $\hat{\hh}_i^j$ are the predicted bounding box coordinates, both
+  for the **grid cell** $i$;
+- The $\conf_i$ and $\confhat_i^j$ are the ground truth confidence score and the predicted confidence score respectively, 
+  both for the **grid cell** $i$;
+- The $\p_i(c)$ and $\phat_i(c)$ are the ground truth probability of the class $c$ and the predicted probability of
+  the class $c$ respectively, 
+  both for the **grid cell** $i$;
 
 
-#### Example with Numbers
+#### Example with Numbers Part I
 
 To be honest, I never understood the above equations without the help of numbers. So let us look at some numbers.
 Let's zoom in on how to calculate loss for one grid cell $i$. And as continuity, we will use the
 $i=30$ grid cell as an example, the one which the dog is located in.
 
+We will use back the dataframe row which represent the grid cell $i=30$, for both
+the ground truth and the predicted bounding boxes.
 
-The observant reader would have realized that the summation $\sum_{j=1}^{B=2}$ can be refactored out of the equation.
-This is because for each grid cell $i$, there is only one bounding box predictor that is matched to the ground truth object.
+```{code-cell} ipython3
+:tags: [output_scroll, remove-input]
+
+display(y_true_df.iloc[30].to_frame().transpose())
+```
+
+```{code-cell} ipython3
+:tags: [output_scroll, remove-input]
+
+display(y_pred_df.iloc[30].to_frame().transpose())
+```
+
+In {eq}`eq:yolov1-loss-for-single-grid-cell`, we first see the first equation $(a)$. Let us forget $\lambda_\textbf{coord}$ for now and just focus on the summand.
+
+1. Inside the summand, there is the indicator function $\mathbb{1}_{ij}^{obj}$, and by definition, we first check
+if there is a ground truth object in the grid cell $i=30$.
+2. We do know that there is a ground truth object in the grid cell $i=30$ as the dog is located in this grid cell, as a priori knowledge. But
+the code does not. It suffices to check the 5th element in the ground truth bounding box coordinates, corresponding
+to the confidence score $\conf_{30}$ in the dataframe. By construction in {prf:ref}`yolo_gt_matrix`, the confidence
+score is 1 if there is a ground truth object in the grid cell, and 0 otherwise. So a quick look at the dataframe
+tells us that $\conf_{30}=1$. So we can proceed.
+3. Next, the matching algorithm happens by means of looping through the $B=2$ bounding box predictors in the grid cell $i=30$.
+   However, we soon realize this is not very easily done in code because at each iteration $j$ over $B=2$, we are only
+   able to compute the `iou(b, bhat)` for the $j$th bounding box predictor in the grid cell $i=30$, but unable
+   to deduce if the current iou is the highest. We can of course find a way to store the highest iou, 
+   but to make explanation easier, we will remove this loop!
+
+#### The Formula Modified
+
+As mentioned in point 3, the observant reader would have realized that the summation $\sum_{j=1}^{B=2}$ can be refactored out of the equation.
+This is because for each grid cell $i$, there is only **one unique** bounding box predictor that is matched to the ground truth object.
 The other bounding box predictor(s) in that same grid cell $i$ will get the cold shoulder since $\mathbb{1}_{ij}^{obj}=0$,
 resulting the summand to be $0$. Further, it is easier to illustrate the loss function with the summation refactored out in code.
 Let's again take the liberty to modify slightly the notation to make it more explicit.
+
+Let $\jmax$ be the index of the bounding box with the IOU score with the ground truth $\y_i$ in grid cell $i$.
+More concretely, $\jmax$ is our survivor out of the $B=2$ bounding box predictors in the grid cell $i$, the one
+that got successfully matched to the ground truth object in the grid cell $i$.
+
+```{prf:definition} $\jmax$
+:label: def_jmax
+
+$\jmax$ is the index in the $B$ predicted bounding boxes which has the highest IOU score with the
+ground truth $\y_i$ in grid cell $i$.
+
+To be more concise, the IOU score is computed between $\b_i$ and $\bhat_i^j$ for $j=1,2$ as IOU
+score is a function of the 4 bounding box coordinates.
+
+$$
+\jmax = \underset{j \in \{1,2\}}{\operatorname{argmax}} \textbf{IOU}(\b_i, \bhat_i^j)
+$$
+```
+
+Then we define the new loss function $\L_i$ for each grid cell $i$ as follows:
+
+```{prf:definition} $\L_i$ Modified!
+:label: def_loss_i
+
+The modified loss function $\L_i$ for each grid cell $i$ is defined as follows:
+
+$$
+  \begin{align}
+      \L_i(\y_i, \yhat_i) & \overset{(a)}{=}  \color{blue}{\lambda_\textbf{coord} \cdot \obji \lsq \lpar x_i - \hat{x}_i^{\jmax} \rpar^2 + \lpar y_i - \hat{y}_i^{\jmax}  \rpar^2 \rsq}                             \\
+                          & \overset{(b)}{+}  \color{blue}{\lambda_\textbf{coord} \cdot \obji \lsq \lpar \sqrt{w_i} - \sqrt{\hat{w}_i^{\jmax} } \rpar^2 + \lpar \sqrt{h_i} - \sqrt{\hat{h}_i^{\jmax} } \rpar^2 \rsq} \\
+                          & \overset{(c)}{+}  \color{green}{\obji \lpar \conf_i - \confhat_i^{\jmax} \rpar^2}                                                                                          \\
+                          & \overset{(d)}{+} \color{green}{\lambda_\textbf{noobj} \cdot \nobji \lpar \conf_i - \confhat_i^{\jmax} \rpar^2}                                                                  \\
+                          & \overset{(e)}{+}  \color{red}{\obji \sum_{c \in \cc} \lpar \p_i(c) - \phat_i(c) \rpar^2}                                                                                               \\
+  \end{align}
+$$
+
+thereby collapsing the equation to checking only two conditions:
+
+- $\obji$ is $1$ when there is an object in cell $i$ and $0$ elsewhere
+- $\1_{i}^{\text{noobj}}$ is $1$ when there is no object in cell $i$ and $0$ elsewhere
+- $\y_i$ is exactly as defined in {prf:ref}`yolo_gt_matrix`'s equation {eq}`eq:gt_yi`.
+- $\yhat_i$ is exactly as defined in {prf:ref}`yolo_pred_matrix`'s equation {eq}`eq:gt_yhati`.
+
+The most significant change is that we are going to pre-compute the IOU score between the ground truth $\y_i$ ($\b_i$)
+with each of the $B=2$ bounding box predictors $\bhat_i^j$ ($j=1,2$) in the grid cell $i$, and then pick the
+bounding box predictor $\bhat_i^j$ with the highest IOU score and denote the index to be $\jmax$.
+```
+
+#### Examples with Numbers Part II
+
+
+
+
+
 
 
 
@@ -1362,35 +1451,6 @@ Let's briefly go through this term by term:
   In short, we will see out of the two bounding boxes which have the highest IOU with the target bounding box, and that will get prioritized for the loss computation.
 
   Finally, we weigh the loss with a constant \lambda_\text{coord}=5 to ensure that our bounding box predictions are as close as possible to the target. Lastly, an identity function 1^\text{obj}_{ij} denotes that the jth bounding box predictor in cell i is responsible for that prediction. Thus, it will be 1 if the target object exists and 0 otherwise.
-
-
-  Before that, recall that {eq}`eq:yolov1-total-loss` is the loss for a single image and takes
-  in $\y$ and $\yhat$ as input. 
-
-  Let $\jmax$ be the index of the bounding box with the highest confidence score in cell $i$.
-
-  $\jmax = \underset{j \in \{1,2\}}{\operatorname{argmax}} \textbf{IOU}(\b_i, \bhat_i^j)$
-
-
-
-$$
-    \begin{align}
-        \L_i(\y_i, \yhat_i) & \overset{(a)}{=}  \color{blue}{\lambda_\textbf{coord} \obji \lsq \lpar x_i - \hat{x}_i^{\jmax} \rpar^2 + \lpar y_i - \hat{y}_i^{\jmax}  \rpar^2 \rsq}                             \\
-                            & \overset{(b)}{+}  \color{blue}{\lambda_\textbf{coord} \obji \lsq \lpar \sqrt{w_i} - \sqrt{\hat{w}_i^{\jmax} } \rpar^2 + \lpar \sqrt{h_i} - \sqrt{\hat{h}_i^{\jmax} } \rpar^2 \rsq} \\
-                            & \overset{(c)}{+}  \color{green}{\obji \lpar \conf_i - \confhat_i^{\jmax} \rpar^2}                                                                                          \\
-                            & \overset{(d)}{+} \color{green}{\lambda_\textbf{noobj} \nobji \lpar \conf_i - \confhat_i^{\jmax} \rpar^2}                                                                  \\
-                            & \overset{(e)}{+}  \color{red}{\obji \sum_{c \in \cc} \lpar \p_i(c) - \phat_i(c) \rpar^2}                                                                                               \\
-    \end{align}
-$$
-
-thereby collapsing the equation to checking only two conditions:
-- $\obji$ is $1$ when there is an object in cell $i$ and $0$ elsewhere
-- $\1_{i}^{\text{noobj}}$ is $1$ when there is no object in cell $i$ and $0$ elsewhere
-
-- $\y_i$ is exactly as defined in {prf:ref}`yolo_gt_matrix`'s equation {eq}`eq:gt_yi`.
-
-
-
 
 
 #### Matching
@@ -1458,37 +1518,9 @@ maximising the objectness confidence, and maximising the liklihood of the correc
 (which is shared between two boxes). 
 For all predicted boxes that are not matched with a ground truth box, 
 it is minimising the objectness confidence, but ignoring the box coordinates 
-and class probabilities {cite}`YOLOV132:online`.
+and class probabilities {cite}`turner_2021`.
 
 In both the dataframes, each row corresponds to a grid cell, $\y_i$ and $\yhat_i$ respectively.
-
-
-
-
-
-### Change of Notation
-
-Let $\jmax$ be the index of the bounding box with the highest confidence score in cell $i$.
-
-$\jmax = \underset{j \in \{1,2\}}{\operatorname{argmax}} \textbf{IOU}(\b_i, \bhat_i^j)$
-
-
-
-$$
-    \begin{align}
-        \L_i(\y_i, \yhat_i) & \overset{(a)}{=}  \color{blue}{\lambda_\textbf{coord} \obji \lsq \lpar x_i - \hat{x}_i^{\jmax} \rpar^2 + \lpar y_i - \hat{y}_i^{\jmax}  \rpar^2 \rsq}                             \\
-                            & \overset{(b)}{+}  \color{blue}{\lambda_\textbf{coord} \obji \lsq \lpar \sqrt{w_i} - \sqrt{\hat{w}_i^{\jmax} } \rpar^2 + \lpar \sqrt{h_i} - \sqrt{\hat{h}_i^{\jmax} } \rpar^2 \rsq} \\
-                            & \overset{(c)}{+}  \color{green}{\obji \lpar \conf_i - \confhat_i^{\jmax} \rpar^2}                                                                                          \\
-                            & \overset{(d)}{+} \color{green}{\lambda_\textbf{noobj} \nobji \lpar \conf_i - \confhat_i^{\jmax} \rpar^2}                                                                  \\
-                            & \overset{(e)}{+}  \color{red}{\obji \sum_{c \in \cc} \lpar \p_i(c) - \phat_i(c) \rpar^2}                                                                                               \\
-    \end{align}
-$$
-
-thereby collapsing the equation to checking only two conditions:
-- $\obji$ is $1$ when there is an object in cell $i$ and $0$ elsewhere
-- $\1_{i}^{\text{noobj}}$ is $1$ when there is no object in cell $i$ and $0$ elsewhere
-
-- $\y_i$ is exactly as defined in {prf:ref}`yolo_gt_matrix`'s equation {eq}`eq:gt_yi`.
 
 
 ### Walkthrough
@@ -1669,5 +1701,8 @@ For the newest assumptions directives.
 [^1]: https://www.harrysprojects.com/articles/yolov1.html
 
 
+## Citations
+
 ```{bibliography}
+:style: unsrt
 ```

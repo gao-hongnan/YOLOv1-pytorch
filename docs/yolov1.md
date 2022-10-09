@@ -57,8 +57,6 @@ $$
 
 # YOLOv1
 
-{cite}`1506026487:online`
-
 YOLO (You Only Look Once) is a single-stage object detector that frames object detection as a single
 regression problem to predict bounding box coordinates and class probabilities of objects in an image.
 The model is called YOLO because you only look once at an image to predict what objects are present 
@@ -79,7 +77,7 @@ The parameterisation of bounding boxes means that the the bounding box coordinat
 relative to a particular grid in the 7×7 grid space (rather than being defined on an absolute scale).
 More information on the model architecture will be detailed in the Model Architecture section below.
 
-## Unified Detection {cite}`1506026487:online`
+## Unified Detection
 
 YOLOv1 is a unified detection model that simultaneously predicts multiple bounding boxes and class.
 
@@ -90,17 +88,19 @@ This is in contrast to other object detection models such as R-CNN which require
 since they use a two-stage pipeline. 
 
 What is so smart about this architecture is that the author managed to design a network such that it can
-reason globally about the image when making predictions. More concretely, the model's feature map is
-so powerful such that it can do both regression and classification at the same time. Regression being
-the task of predicting bounding box coordinates and classification being the task of predicting class.
-Although in the first version of YOLO, the model is treated as regression globally, but in later versions
+reason globally about the image when making predictions. The model's feature map is
+so powerful such that it can do both **regression (locate)** and **classification (classify)** at the same time. 
+Regression being the task of predicting/localizing bounding box coordinates and 
+classification being the task of predicting the class of the object in the bounding box.
+In the first version of YOLO, the model is treated as a regression problem, simply because the loss function
+is mean squared error, but in later versions
 of YOLO, the model is revised such that the loss function is a combination of regression and classification.
 
 Before we dive into more details, we define the model architecture first.
 
 ## Model Architecture
 
-The model architecture from the YOLOv1 paper is presented below.
+The model architecture from the YOLOv1 paper is presented below in {numref}`yolov1-model`.
 
 ```{figure} https://storage.googleapis.com/reighns/images/yolov1_model.png
 ---
@@ -111,7 +111,12 @@ name: yolov1-model
 YoloV1 Model Architecture
 ```
 
-The below figure is a zoomed in version of the last layer, a cuboid of shape $7 \times 7 \times 30$.
+The YOLOv1 model is made up of 24 convolutional layers and 2 fully connected layers, a surprisingly
+simple architecture that resembles a image classification model. The authors also mentioned that
+the model was inspired by GoogLeNet.
+
+We are more interested in the last layer of the network, as that is where the novelty lies.
+{numref}`label-matrix` is a zoomed in version of the last layer, a cuboid of shape $7 \times 7 \times 30$.
 This cuboid is extremely important to understand, which we will mention more later.
 
 ```{figure} https://storage.googleapis.com/reighns/images/label_matrix.png
@@ -123,7 +128,9 @@ The output tensor from YOLOv1's last layer.
 
 ### Python Implementation
 
-In our implementation, there are some small changes such as adding 
+We present a python implementation of the model in PyTorch. The implementation is modified
+from Aladdin Persson's [repository](https://github.com/aladdinpersson/Machine-Learning-Collection).
+In the implementation, there are some small changes such as adding 
 [**batch norm**](https://pytorch.org/docs/stable/generated/torch.nn.BatchNorm2d.html) layers.
 However, the overall architecture remains similar to what was proposed in the paper.
 
@@ -371,12 +378,14 @@ print(f"y_preds.shape: {y_preds.shape}")
 
 The input label `y_trues` and `y_preds` are of shape `(batch_size, S, S, B * 5 + C)`, 
 in our case is `(4, 7, 7, 30)` and indeed the shape that we expected in {numref}`label-matrix`.
-We will talk more in section on [head](yolov1.md#head) below.
+The additional first dimension is the batch size.
+We will talk more in the next few sections.
 
 (yolov1.md#model-summary)=
 ### Model Summary
 
-We use `torchinfo` package to print out the model summary.
+We use `torchinfo` package to print out the model summary. This is a useful tool that
+is similar to `model.summary()` in Keras.
 
 ```{code-cell} ipython3
 :tags: [hide-output]
@@ -415,6 +424,10 @@ print(f"yolov1 last layer: {yolov1.head[-1]}")
 Unfortunately, the info is not very helpful. We will refer back to the model summary
 in section [model summary](yolov1.md#model-summary) to understand the output shape of the last layer.
 
+```python
+Linear: 2-33                      [4, 1470]                 6,022,590
+```
+
 Notice that the last layer is actually a linear (fc) layer with shape `[4, 1470]`. This is in
 contrast of the output shape of `y_preds` which is `[4, 7, 7, 30]`. This is because in the
 `forward` method, we reshaped the output of the last layer to be `[4, 7, 7, 30]`.
@@ -435,7 +448,7 @@ We can also think of it as a 2D matrix, where we flatten the first and second di
 collapsing the $7 \times 7$ grid into a single dimension of $49$. The reason why I did this is for
 easier interpretation, as a 2D matrix is easier to visualize than a 3D tensor.
 
-We will carry this idea forward in the next section.
+We will carry this idea forward to the next few sections.
 ````
 
 ## Anchors and Prior Boxes
@@ -463,7 +476,7 @@ Quoting from the paper:
 
 > Our system divides the input image into an S × S grid.
 If the center of an object falls into a grid cell, that grid cell
-is responsible for detecting that object. {cite}`1506026487:online`
+is responsible for detecting that object {cite}`redmon_divvala_girshick_farhadi_2016`.
 
 Let's visualize this idea with the help of the diagram below.
 
@@ -512,7 +525,7 @@ We have answered the reason for why we need to divide the input image into an $S
 why there the output tensor's shape has a 3rd dimension of depth $B * 5 + C = 30$?
 
 > Each grid cell predicts $B$ bounding boxes and confidence
-scores for those boxes as well as $C$ conditional class probabilities {cite}`1506026487:online`.
+scores for those boxes as well as $C$ conditional class probabilities {cite}`redmon_divvala_girshick_farhadi_2016`.
 
 For each grid cell $i$, we a 30-d vector, 30 is derived from $5 \times B + C$ elements.
 
@@ -550,8 +563,6 @@ name: yolov1-sample-image
 ---
 Sample Image with Grids.
 ```
-
-
 
 (yolov1.md#bounding-box-parametrization)=
 ### Bounding Box Parametrization
@@ -801,7 +812,7 @@ Here we see this image has 2 bounding boxes, and each bounding box has 5 values,
 to the 5 values in the YOLO format. 
 
 Our goal here is to convert the YOLO style labels into a $49 \times 30$ matrix
-(equivalent to a 3D tensor of shape $7 \times 7 \times 30$.
+(equivalent to a 3D tensor of shape $7 \times 7 \times 30$).
 
 Recall that in section [bounding box parametrization](yolov1.md#bounding-box-parametrization), we
 mentioned that YOLOv1 predicts the offset for its bounding box center, and the square root 
@@ -809,7 +820,7 @@ of width and height. And recall that the ground truth bounding box's center dete
 which grid cell it belongs to, this is particularly important to remember.
 
 More formally, we denote the subscript $i$ to be the $i$-th grid cell where
-$i \in \{1, 2, \ldots 49\}$ as seen in figure {numref}`3dto2d`.
+$i \in \{1, 2, \ldots 49\}$ as seen in {numref}`3dto2d`.
 
 We will assume $S=7$, $B=2$, and $C=20$, where
 
@@ -980,17 +991,30 @@ and of course they must be the same shape as $\y$.
 Possibly the most important part of the YOLOv1 paper is the loss function, it is also
 the most confusing if you are not familiar with the notation. 
 
+We will use the first batch of images to illustrate the loss function, the batch size is 4.
+
+```{figure} ./assets/batch_image.png
+---
+name: first_batch
+---
+The first 4 images.
+```
+
+We will encode the 4 ground truth images in the first batch into the ground truth matrix $\y$.
+Subsequently, we will pass the first batch of images to our model defined in the model section
+and obtain the prediction matrix $\hat{\y}$.
+
 ````{admonition} Abuse of Notation
-When I say grid cell $i$, it also means the $i$-th row of the ground truth and prediction matrix.
+In {prf:ref}`yolo_gt_matrix` and {prf:ref}`yolo_pred_matrix`, $\y$ and $\hat{\y}$ are 2 dimensional matrices
+with shape $49 \times 30$. Here, we are loading 4 images, so the shape of $\y$ and $\hat{\y}$ will be
+$4 \times 49 \times 30$. 
 ````
 
-Before we go on, some logistics:
-
-I directly saved the ground truth matrix and prediction matrix as `y_trues.pt` and `y_preds.pt` 
+I directly saved the ground truth matrix $\y$ and prediction matrix $\yhat$ as `y_trues.pt` and `y_preds.pt` 
 respectively, you can load them with `torch.load` and they are in the shape of `[4, 7, 7, 30]`. 
 This means that there are 4 images in the batch, each image has a ground truth matrix of shape
 `[7, 7, 30]` and a prediction matrix of shape `[7, 7, 30]`. The 4 images are the first 4 images in our 
-first batch of the train loader.
+first batch of the train loader, as illustrated in {numref}`first_batch`.
 
 ```{code-cell} ipython3
 # load directly the first batch of the train loader
@@ -1000,7 +1024,7 @@ print(f"y_trues.shape: {y_trues.shape}")
 print(f"y_preds.shape: {y_preds.shape}")
 ```
 
-To be consistent with our notation and definition in {prf:ref}`yolo_gt_matrix` and {prf:ref}`yolo_pred_matrix`,
+To be **consistent** with our notation and definition in {prf:ref}`yolo_gt_matrix` and {prf:ref}`yolo_pred_matrix`,
 we will only use the first image in the batch, `y_true = y_trues[0]` and `y_pred = y_preds[0]` 
 and reshape them to be `[49, 30]` and `[49, 30]` respectively. Thus, `y_true`
 corresponds to the ground truth matrix 
@@ -1034,6 +1058,14 @@ display(y_true_df)
 display(y_pred_df)
 ```
 
+````{admonition} Some Remarks
+It should not come as a surprise that almost all rows in the ground truth matrix $\y$ (`y_true_df`)
+are zeros, by construction, the ground truth matrix $\y$ only has non-zero values in the rows
+where there is an object. Neither should you be worried that the prediction matrix $\hat{\y}$
+(`y_pred_df`) has "jibberish" values, this is because this is the first pass of the model for the
+first batch of images, the model has not been trained properly yet.
+````
+
 ### Bipartite Matching
 
 **TODO put more image**
@@ -1043,7 +1075,7 @@ Let us take the dog for an example, the dog lies in grid cell $i=30$ as the grou
 is encoded in row 30 of the ground truth matrix $\y$.
 
 ```{code-cell} ipython3
-:tags: [output_scroll, remove-input]
+:tags: [output_scroll]
 
 display(y_true_df.iloc[30].to_frame().transpose())
 ```
@@ -1061,9 +1093,8 @@ different from the ground truth. The reason you see negative coordinates is beca
 are not constrained, it ranges from $-\infty$ to $\infty$. A reasonable choice is to add a `nn.Sigmoid()`
 layer after the last layer of the `head` module, but we did not do that.
 
-
 ```{code-cell} ipython3
-:tags: [output_scroll, remove-input]
+:tags: [output_scroll]
 
 display(y_pred_df.iloc[30].to_frame().transpose())
 ```
@@ -1092,7 +1123,7 @@ In other words, we use IOU as a proxy to measure the similarity metric of `IOU(b
 and `IOU(b_gt, b_pred_2)`. The bounding box (`b_pred_1` or `b_pred_2` but never both)
 with the highest IOU will be the one that we choose to compute the loss with.
 
-And this is why in the paper {cite}`1506026487:online,`, the authors mentioned that the
+And this is why in the paper {cite}`redmon_divvala_girshick_farhadi_2016,`, the authors mentioned that the
 construction of the **confidence in ground truth** to be:
 
 $$
@@ -1134,7 +1165,7 @@ Having the construction of the ground truth and the prediction matrix, it is now
 how the loss function is formulated. I took the liberty to change the notations from the original
 paper for simplicity.
 
-Let's look at the original loss function from the paper {cite}`1506026487:online`:
+Let's look at the original loss function from the paper {cite}`redmon_divvala_girshick_farhadi_2016`:
 
 $$
 \begin{align}
@@ -1190,10 +1221,12 @@ $$
 Before we dive into what each equation means, we first establish the notations that we will be using:
 
 We define the loss function to be $\L$, a function of $\y$ and $\yhat$ respectively. 
-However, owing to the fact $\y$ and $\yhat$ are both of shape $\R^{49 \times 30}$, 
-it is more beneficial to take a step back and recall that we are actually computing
+Both $\y$ and $\yhat$ are both of shape $\R^{49 \times 30}$, the **outer summation** $\sum_{i = 0}^{S^2}$
+tells us that we are actually computing
 the loss over each grid cell $i$ and summing them (49 rows) up afterwards, which constitute
-to our total loss $\L(\y, \yhat)$.
+to our total loss $\L(\y, \yhat)$. We will skip the meaning behind the summation $\sum_{i = 0}^{B}$ for now.
+
+The {numref}`yolov1-loss_1` depicts how the loss function is summed over a single image over all the grid cells.
 
 ```{figure} ./assets/image_1_loss.jpg
 ---
@@ -1202,7 +1235,8 @@ name: yolov1-loss_1
 Loss function for a single image.
 ```
 
-Consequently, we define $\L_i$ to be the loss of each grid cell $i$ and simply say that 
+Consequently, we define $\L_i$ to be the loss of each grid cell $i$ and say that the total loss for 
+a single image is defined as:
 
 $$
 \begin{align}
@@ -1223,17 +1257,23 @@ and will be shown in code later.
 
 $$
 \begin{align}
-    \L(\y, \yhat) & \overset{(d)}{=} \sum_{k=0}^{\text{Batch Size}}\L(\y^{k}, \yhat^{k})                       \\
+    \L(\y, \yhat) & \overset{(d)}{=} \dfrac{1}{\text{Batch Size}} \sum_{k=0}^{\text{Batch Size}}\L(\y^{k}, \yhat^{k})                       \\
 \end{align}
 $$ (eq:yolov1-total-loss-over-batches)
 
 ### Loss for a Single Grid Cell in a Single Image
 
-The simplication in the previous section is to allow us to better appreciate what each equation in the loss
+The simplication in the previous sections is to allow us to better appreciate what each equation in the loss
 function mean.
 
-Let's zoom in on how to calculate loss for one grid cell $i$. And as continuity, we will use the
-$i=30$ grid cell as an example, the one which the dog is located in.
+We will also make some very rigid assumptions:
+
+```{prf:assumption} Bounding Box Per Grid Cell Assumption
+:label: assumption:bb-per-grid-cell
+
+The number of bounding boxes per grid cell is fixed to 2. This simplifies the code and
+make the bipartite matching idea more explicit.
+```
 
 ````{admonition} Intuition
 Before we look at the seemingly scary formula, let us first think retrospectively on what the loss
@@ -1249,9 +1289,10 @@ has an object where in fact there is no object.
 5. The loss should penalize the model if the predicted bounding box is not predicting the correct class.
 ````
 
-#### The Modified Formula
+#### The Formula
 
-Firstly, for one grid cell $i$, the loss $\L_i(\y_i, \yhat_i)$ is defined as:
+Equation {eq}`eq:yolov1-total-loss` is the loss function for a single image.
+Consequently, we define $\L_i(\y_i, \yhat_i)$ to be the loss of each grid cell $i$
 
 $$
     \begin{align}
@@ -1265,27 +1306,51 @@ $$
 
 where
 
-- We removed the outer summation over $i$ as we are only looking at one grid cell $i$.
+- We removed the outer summation $\sum_{i=1}^{S^2=49}$ as we are only looking at one grid cell $i$.
 - $\mathbb{1}_{i}^{obj}$ is $1$ when there is a **ground truth object** in cell $i$ and $0$ otherwise. 
-- $\mathbb{1}_{ij}^{obj}$ denotes that the $j$th bounding box predictor in cell $i$ that is responsible for that prediction. 
-  - In other words, it is equal to $1$ if there is a **ground truth object** in cell $i$ and 
-  IOU score of the $j$th predictors of this cell is the highest among all the predictors of this cell
-  when compared to the ground truth. 
+- $\mathbb{1}_{ij}^{obj}$ denotes that the $j$th bounding box predictor in cell $i$ is **matched** to ground truth object.
+  This is not easy to understand.
+    - What this means in our context is that for any grid cell $i$, there are $B=2$ bounding box predictors;
+    - Then, $\mathbb{1}_{ij}^{obj}$ is $1$ if it fulfills two conditions:
+    - Firstly, there is a ground truth object in cell $i$.
+    - Secondly, if the first point is true, then out of the $B=2$ bounding box predictors, only one of them is matched to the ground truth object. 
+       We index the 2 bounding box predictors with $j$, and the one that is matched to the ground truth object will have $\mathbb{1}_{ij}^{obj}=1$,
+       and the other one will have $\mathbb{1}_{ij}^{obj}=0$, essentially only taking the matched bounding box predictor into account.
+    - Remember the matching is done by checking which of the $B=2$ predicted bounding box has the highest IOU score with the ground truth bounding box.
+    - This is why the notation has a summation $\sum_{j=1}^{B=2}$, we are looping over the $B=2$ bounding box predictors to see which one is matched to the ground truth object.
+  
+$$
+\1_{ij}^{\text{obj}} = 
+\begin{cases}
+    1     & \textbf{if the ith grid cell has a ground truth obj and jth predictor is matched}\\
+    0     & \textbf{otherwise}
+\end{cases}
+$$
+
 - $\mathbb{1}_{ij}^{noobj}$ is the opposite of $\mathbb{1}_{ij}^{obj}$, where it is $1$ when there is no **ground truth object** in cell $i$ 
 and the $j$th bounding box predictor in cell $i$ has the highest IOU score among all the predictors of this cell
 when compared to the ground truth. **More on this later as there can be a few interpretations.**
 - Note carefully $j$ in this context is the indices of the bounding box predictors in each grid cell i.e. in $\bhat^1$ is the 1st predicted bounding box and the 1 refers to the index $j=1$.
-- Do not be afraid of the $\1_{ij}^{\text{obj}}$, it simply means that in grid cell $i$, we loop over the number of bounding boxes (which is 2), and then for each predicted bounding box, we check what $\1_{ij}^{\text{obj}}$ evaluates to:
+- A constant on **what is matched with an object mean? -> it means the bipartite matching algorithm discussed in the previous section**.
+- Last but not least, the $\xx_i$, $\yy_i$, $\ww_i$, $\hh_i$ are the ground truth bounding box coordinates and $\hat{\xx}_i^j$, $\hat{\yy}_i^j$, $\hat{\ww}_i^j$, $\hat{\hh}_i^j$ are the predicted bounding box coordinates.
+- The $\conf_i$ and $\confhat_i^j$ are the ground truth confidence score and the predicted confidence score respectively.
+- The $\obji$ is $1$ if there is a ground truth object in cell $i$ and $0$ otherwise.
 
-$$
-\1_{ij}^{\text{obj}} = 
-\begin{cases}
-    1     & \textbf{if the jth box in the ith grid cell is matched with a ground truth object in grid cell i}\\
-    0     & \textbf{if the jth box in the ith grid cell is not matched with a ground truth object in grid cell i}
-\end{cases}
-$$
 
-and **what is matched with an object mean? -> it means the bipartite matching algorithm discussed in the previous section**.
+#### Example with Numbers
+
+To be honest, I never understood the above equations without the help of numbers. So let us look at some numbers.
+Let's zoom in on how to calculate loss for one grid cell $i$. And as continuity, we will use the
+$i=30$ grid cell as an example, the one which the dog is located in.
+
+
+The observant reader would have realized that the summation $\sum_{j=1}^{B=2}$ can be refactored out of the equation.
+This is because for each grid cell $i$, there is only one bounding box predictor that is matched to the ground truth object.
+The other bounding box predictor(s) in that same grid cell $i$ will get the cold shoulder since $\mathbb{1}_{ij}^{obj}=0$,
+resulting the summand to be $0$. Further, it is easier to illustrate the loss function with the summation refactored out in code.
+Let's again take the liberty to modify slightly the notation to make it more explicit.
+
+
 
 Let's briefly go through this term by term:
 
@@ -1323,6 +1388,10 @@ thereby collapsing the equation to checking only two conditions:
 - $\1_{i}^{\text{noobj}}$ is $1$ when there is no object in cell $i$ and $0$ elsewhere
 
 - $\y_i$ is exactly as defined in {prf:ref}`yolo_gt_matrix`'s equation {eq}`eq:gt_yi`.
+
+
+
+
 
 #### Matching
 
@@ -1583,8 +1652,18 @@ $$
 
 ## References
 
-s
+- https://stats.stackexchange.com/questions/287486/yolo-loss-function-explanation/287497#_=_
+- https://stats.stackexchange.com/questions/287486/yolo-loss-function-explanation/287497#287497
+- https://hackernoon.com/understanding-yolo-f5a74bbc7967
 
+## Sphinx
+
+```bash
+$ pip uninstall sphinx-proof
+$ pip install -U git+https://github.com/executablebooks/sphinx-proof.git@master
+```
+
+For the newest assumptions directives.
 
 
 [^1]: https://www.harrysprojects.com/articles/yolov1.html

@@ -5,6 +5,10 @@ from model import Yolov1Darknet
 from train import train_one_epoch, valid_one_epoch
 from dataset import VOCDataset, get_transform
 from utils import seed_all
+import hydra
+from hydra.core.config_store import ConfigStore
+from omegaconf import MISSING, OmegaConf
+import hydra.utils as hu
 
 # from loss import YoloLoss, YOLOv1Loss, YOLOv1Loss2D
 from config import config
@@ -20,10 +24,21 @@ WEIGHT_DECAY = 0
 NUM_WORKERS = 0
 seed_all(seed=1992)
 
-ModelConfig = config.ModelConfig()
+# ModelConfig = config.ModelConfig()
+
+cs = ConfigStore.instance()
+cs.store(name="config", node=config.ModelConfig)
+# cs.store(name="config", node=ClassMap)
 
 
-def main(debug: bool = True):
+@hydra.main(version_base=None, config_path="../config", config_name="config")
+def run(cfg: config.ModelConfig):
+    print(OmegaConf.to_yaml(cfg))
+    print(cfg.architecture)
+    main(cfg)
+
+
+def main(cfg, debug: bool = True):
     if debug:
         BATCH_SIZE = 4
         EPOCHS = 10
@@ -33,7 +48,7 @@ def main(debug: bool = True):
 
     S, B, C = 7, 2, 20
     model = Yolov1Darknet(
-        architecture=ModelConfig.architecture, in_channels=3, S=7, B=2, C=20
+        architecture=cfg.architecture, in_channels=3, S=7, B=2, C=20
     ).to(DEVICE)
 
     optimizer = torch.optim.Adam(
@@ -140,4 +155,5 @@ def main(debug: bool = True):
 
 
 if __name__ == "__main__":
-    main(debug=DEBUG)
+    # main(debug=DEBUG)
+    run()
